@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Service\RadiologiController;
 use App\Http\Controllers\Api\Service\LaboratoriumController;
 use App\Http\Controllers\Api\Service\SIMRSController;
+use App\Http\Controllers\Api\Service\ReservasiController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -40,6 +41,10 @@ Route::prefix('service')
             '/getdatapasien',
             [SIMRSController::class, 'GetData']
         );
+         Route::get(
+            '/getdataeduboard',
+            [SIMRSController::class, 'masterEduBoard']
+        );
            Route::get(
             '/getantreanpasien',
             [SIMRSController::class, 'cekAntreanPasien']
@@ -52,5 +57,9 @@ Route::prefix('service')
         Route::get(
             '/get-data-rl3-2',
             [SIMRSController::class, 'getDataRL3_2']
+        );
+        Route::get(
+            '/getriwayatreservasi',
+            [ReservasiController::class, 'getRiwayatReservasi']
         );
     });

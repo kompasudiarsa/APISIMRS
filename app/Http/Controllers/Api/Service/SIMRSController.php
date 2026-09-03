@@ -4185,4 +4185,36 @@ class SIMRSController extends Controller
             ->where('tm.statusenabled', true)
             ->count();
     }
+    public function masterEduBoard(Request $r)
+    {
+        $data  = DB::connection('pgsql')->table('eduboard_m');
+            if (isset($r['id']) && $r['id'] != '') {
+                $data = $data->where('id', '=',  $r['id']);
+            }
+            if (isset($r['namaeduboard']) && $r['namaeduboard'] != '') {
+                $data = $data->where('namaeduboard', 'ilike', '%' . $r['namaeduboard'] . '%');
+            }
+            if (isset($r['statusenabled']) && $r['statusenabled'] != '') {
+                $data = $data->where('statusenabled', '=', $r['statusenabled']);
+            }
+            if (isset($r['_total']) && $r['_total'] != '') {
+            }
+    
+        $data = $data->orderByDesc('id','desc');
+        $data = $data->get();
+
+        foreach ($data as $d) {
+            $d->statusenabled;
+            $d->status = 'Aktif';
+            $d->status_c = 'info';
+            if ($d->statusenabled != 'false') {
+                $d->status = 'Nonaktif';
+                $d->status_c = 'danger';
+            }
+
+        }
+
+        $res['data'] = $data;
+      return response()->json($res, 200);
+    }
 }
