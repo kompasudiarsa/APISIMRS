@@ -62,4 +62,9 @@ Route::prefix('service')
             '/getriwayatreservasi',
             [ReservasiController::class, 'getRiwayatReservasi']
         );
+        
+        Route::get(
+            '/getdatariwayatreservasi',
+            [ReservasiController::class, 'getDataRiwayatReservasi']
+        );
     });
