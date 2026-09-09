@@ -530,17 +530,17 @@ class ReservasiController extends Controller
         $tgllahir = trim((string) $request->input('tgllahir', ''));
 
         /*
-    |--------------------------------------------------------------------------
-    | Tanggal hari ini
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Tanggal hari ini
+        |--------------------------------------------------------------------------
+        */
         $tanggalHariIni = now()->format('Y-m-d');
 
         /*
-    |--------------------------------------------------------------------------
-    | Jadwal Dokter
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Jadwal Dokter
+        |--------------------------------------------------------------------------
+        */
         $jadwalDokter = DB::connection('pgsql')
             ->table('jadwaldokter_m')
             ->selectRaw("
@@ -559,10 +559,10 @@ class ReservasiController extends Controller
             ->groupByRaw('CAST(tanggal AS DATE)');
 
         /*
-    |--------------------------------------------------------------------------
-    | Query Reservasi
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Query Reservasi
+        |--------------------------------------------------------------------------
+        */
         $data = DB::connection('pgsql')
             ->table('antrianpasienregistrasi_t as apr')
 
@@ -687,6 +687,13 @@ class ReservasiController extends Controller
                 'apr.objectpegawaifk',
 
                 'ru.namaruangan',
+
+                /*
+                |--------------------------------------------------------------------------
+                | Kode Poli Subspesialis BPJS
+                |--------------------------------------------------------------------------
+                */
+                'ru.kdsubspesialisbpjs as kodepolisubspesialis',
 
                 'apr.isconfirm',
 
@@ -1010,10 +1017,10 @@ class ReservasiController extends Controller
             );
 
         /*
-    |--------------------------------------------------------------------------
-    | Filter tanggal lahir
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Filter tanggal lahir
+        |--------------------------------------------------------------------------
+        */
         if (
             $tgllahir !== '' &&
             $tgllahir !== 'undefined' &&
@@ -1034,10 +1041,10 @@ class ReservasiController extends Controller
         }
 
         /*
-    |--------------------------------------------------------------------------
-    | Filter RM / NIK / BPJS / Nama
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Filter RM / NIK / BPJS / Nama
+        |--------------------------------------------------------------------------
+        */
         if (
             $nocmnama !== '' &&
             $nocmnama !== 'undefined' &&
@@ -1083,10 +1090,10 @@ class ReservasiController extends Controller
         }
 
         /*
-    |--------------------------------------------------------------------------
-    | Filter nomor reservasi
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Filter nomor reservasi
+        |--------------------------------------------------------------------------
+        */
         if (
             $noreservasi !== '' &&
             $noreservasi !== 'undefined' &&
@@ -1122,10 +1129,10 @@ class ReservasiController extends Controller
         }
 
         /*
-    |--------------------------------------------------------------------------
-    | Ambil hanya 1 reservasi terdekat
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Ambil hanya 1 reservasi terdekat
+        |--------------------------------------------------------------------------
+        */
         $reservasi = $data
             ->orderByRaw(
                 'CAST(apr.tanggalreservasi AS DATE) ASC'
@@ -1137,10 +1144,10 @@ class ReservasiController extends Controller
             ->first();
 
         /*
-    |--------------------------------------------------------------------------
-    | Tidak ada reservasi
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Tidak ada reservasi
+        |--------------------------------------------------------------------------
+        */
         if (!$reservasi) {
             return response()->json([
                 'total' => 0,
@@ -1150,15 +1157,15 @@ class ReservasiController extends Controller
         }
 
         /*
-    |--------------------------------------------------------------------------
-    | Cari Registrasi / PD
-    |--------------------------------------------------------------------------
-    |
-    | Prioritas:
-    | 1. PD yang langsung terhubung dengan APR
-    | 2. Fallback PD pasien pada tanggal yang sama
-    |
-    */
+        |--------------------------------------------------------------------------
+        | Cari Registrasi / PD
+        |--------------------------------------------------------------------------
+        |
+        | Prioritas:
+        | 1. PD yang langsung terhubung dengan APR
+        | 2. Fallback PD pasien pada tanggal yang sama
+        |
+        */
 
         $tanggalReservasi = (string) $reservasi->tanggalreservasi;
 
@@ -1193,14 +1200,14 @@ class ReservasiController extends Controller
             ->first();
 
         /*
-    |--------------------------------------------------------------------------
-    | Fallback registrasi langsung
-    |--------------------------------------------------------------------------
-    |
-    | Ini mengikuti konsep cekAntreanPasien() yang juga dapat mengenali
-    | registrasi pasien walaupun tidak mempunyai FK APR.
-    |
-    */
+        |--------------------------------------------------------------------------
+        | Fallback registrasi langsung
+        |--------------------------------------------------------------------------
+        |
+        | Ini mengikuti konsep cekAntreanPasien() yang juga dapat mengenali
+        | registrasi pasien walaupun tidak mempunyai FK APR.
+        |
+        */
         if (!$registrasi) {
             $registrasi = DB::connection('pgsql')
                 ->table('pasiendaftar_t as pd')
@@ -1238,10 +1245,10 @@ class ReservasiController extends Controller
         }
 
         /*
-    |--------------------------------------------------------------------------
-    | Cari APD
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Cari APD
+        |--------------------------------------------------------------------------
+        */
         $apd = null;
 
         if ($registrasi) {
@@ -1327,18 +1334,18 @@ class ReservasiController extends Controller
         }
 
         /*
-    |--------------------------------------------------------------------------
-    | Helper Boolean
-    |--------------------------------------------------------------------------
-    |
-    | Mengikuti fungsi cekAntreanPasien karena beberapa field dapat berisi:
-    |
-    | true / false
-    | 1 / 0
-    | t / f
-    | string
-    |
-    */
+        |--------------------------------------------------------------------------
+        | Helper Boolean
+        |--------------------------------------------------------------------------
+        |
+        | Mengikuti fungsi cekAntreanPasien karena beberapa field dapat berisi:
+        |
+        | true / false
+        | 1 / 0
+        | t / f
+        | string
+        |
+        */
         $nilaiAktif = static function ($value): bool {
             if ($value === null) {
                 return false;
@@ -1375,19 +1382,19 @@ class ReservasiController extends Controller
         };
 
         /*
-    |--------------------------------------------------------------------------
-    | Tentukan Status Pasien
-    |--------------------------------------------------------------------------
-    |
-    | Urutan mengikuti cekAntreanPasien:
-    |
-    | 1. Sudah Closing
-    | 2. Selesai
-    | 3. Sedang Diperiksa
-    | 4. Sudah Teregistrasi
-    | 5. Menunggu Pelayanan
-    |
-    */
+        |--------------------------------------------------------------------------
+        | Tentukan Status Pasien
+        |--------------------------------------------------------------------------
+        |
+        | Urutan mengikuti cekAntreanPasien:
+        |
+        | 1. Sudah Closing
+        | 2. Selesai
+        | 3. Sedang Diperiksa
+        | 4. Sudah Teregistrasi
+        | 5. Menunggu Pelayanan
+        |
+        */
 
         if (!$registrasi) {
 
@@ -1498,10 +1505,10 @@ class ReservasiController extends Controller
         }
 
         /*
-    |--------------------------------------------------------------------------
-    | Tambahkan informasi registrasi
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Tambahkan informasi registrasi
+        |--------------------------------------------------------------------------
+        */
         $reservasi->sudah_teregistrasi =
             $registrasi ? true : false;
 
@@ -1523,10 +1530,10 @@ class ReservasiController extends Controller
             : 'Belum Teregistrasi';
 
         /*
-    |--------------------------------------------------------------------------
-    | Identitas Registrasi
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Identitas Registrasi
+        |--------------------------------------------------------------------------
+        */
         $reservasi->noregistrasi = data_get(
             $registrasi,
             'noregistrasi'
@@ -1543,10 +1550,10 @@ class ReservasiController extends Controller
         );
 
         /*
-    |--------------------------------------------------------------------------
-    | Status Pasien
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Status Pasien
+        |--------------------------------------------------------------------------
+        */
         $reservasi->status_pasien =
             $statusPasien;
 
@@ -1557,20 +1564,20 @@ class ReservasiController extends Controller
             $classStatus;
 
         /*
-    |--------------------------------------------------------------------------
-    | Status asli APD
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Status asli APD
+        |--------------------------------------------------------------------------
+        */
         $reservasi->status_asli = data_get(
             $apd,
             'status'
         );
 
         /*
-    |--------------------------------------------------------------------------
-    | Informasi proses pemeriksaan
-    |--------------------------------------------------------------------------
-    */
+        |--------------------------------------------------------------------------
+        | Informasi proses pemeriksaan
+        |--------------------------------------------------------------------------
+        */
         $reservasi->tglregistrasi = data_get(
             $registrasi,
             'tglregistrasi'
@@ -1602,15 +1609,15 @@ class ReservasiController extends Controller
         );
 
         /*
-    |--------------------------------------------------------------------------
-    | Response
-    |--------------------------------------------------------------------------
-    |
-    | Tetap array agar kompatibel dengan response sebelumnya:
-    |
-    | data: [ {...} ]
-    |
-    */
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        |
+        | Tetap array agar kompatibel dengan response sebelumnya:
+        |
+        | data: [ {...} ]
+        |
+        */
         return response()->json([
             'total' => 1,
             'data' => [
