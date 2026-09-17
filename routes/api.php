@@ -71,6 +71,10 @@ Route::prefix('service')
             '/getdatariwayatreservasi',
             [ReservasiController::class, 'getDataRiwayatReservasi']
         );
+         Route::get(
+            '/listriwayatregistrasipasien',
+            [ReservasiController::class, 'listRiwayatRegistrasiPasien']
+        );
           Route::get(
             '/getlistantrianfarmasi',
             [SIMRSController::class, 'getListAntrianFarmasi']

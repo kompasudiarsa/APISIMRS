@@ -4236,802 +4236,1003 @@ class SIMRSController extends Controller
         return response()->json(['data' => $data], 200);
     }
     public function getDetailResep(Request $request)
-    {
-      
+{
+    /*
+    |--------------------------------------------------------------------------
+    | Nomor Registrasi
+    |--------------------------------------------------------------------------
+    |
+    | Contoh:
+    |
+    | ?noregistrasi=2608310650
+    |
+    */
+    $noregistrasi = trim(
+        (string) $request->input(
+            'noregistrasi',
+            $request->input(
+                'noRegistrasi',
+                ''
+            )
+        )
+    );
 
-        $noResep = trim(
-            (string) $request->input('noResep', '')
-        );
-
-        /*
+    /*
     |--------------------------------------------------------------------------
     | Validasi
     |--------------------------------------------------------------------------
     */
-        if (
-            $noResep === '' ||
-            $noResep === 'undefined' ||
-            $noResep === 'null'
-        ) {
-            return $this->respond([
-                'detailresep' => [],
-                'pelayananPasien' => [],
-                'message' => 'noResep wajib diisi.',
-            ]);
-        }
+    if (
+        $noregistrasi === ''
+        || $noregistrasi === 'undefined'
+        || $noregistrasi === 'null'
+    ) {
+        return response()->json([
+            'detailresep' => null,
+            'daftarResep' => [],
+            'pelayananPasien' => [],
+            'message' => 'noregistrasi wajib diisi.',
+        ], 422);
+    }
 
-        /*
+
+    /*
     |--------------------------------------------------------------------------
     | Query Detail Resep
     |--------------------------------------------------------------------------
+    |
+    | Dasar pencarian:
+    |
+    | SELECT *
+    | FROM strukresep_t
+    | WHERE noregistrasi = '2608310650'
+    |
     */
-        $data = DB::table('strukresep_t as sr')
+    $data = DB::table('strukresep_t as sr')
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Dokter / Penulis Resep
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'pegawai_m as pg',
-                'pg.id',
-                '=',
-                'sr.penulisresepfk'
-            )
+        ->join(
+            'pegawai_m as pg',
+            'pg.id',
+            '=',
+            'sr.penulisresepfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Ruangan Resep
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'ruangan_m as ru2',
-                'ru2.id',
-                '=',
-                'sr.ruanganfk'
-            )
+        ->join(
+            'ruangan_m as ru2',
+            'ru2.id',
+            '=',
+            'sr.ruanganfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Detail Pelayanan / Obat
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'pelayananpasien_t as pp',
-                'pp.strukresepfk',
-                '=',
-                'sr.norec'
-            )
+        ->join(
+            'pelayananpasien_t as pp',
+            'pp.strukresepfk',
+            '=',
+            'sr.norec'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Obat Kronis
         |--------------------------------------------------------------------------
         */
-            ->leftJoin(
-                'pelayananpasienobatkronis_t as pp2',
-                function ($join) {
-                    $join
-                        ->on(
-                            'pp2.strukresepfk',
-                            '=',
-                            'pp.strukresepfk'
-                        )
-                        ->on(
-                            'pp2.produkfk',
-                            '=',
-                            'pp.produkfk'
-                        )
-                        ->where(
-                            'pp.iskronis',
-                            true
-                        );
-                }
-            )
+        ->leftJoin(
+            'pelayananpasienobatkronis_t as pp2',
+            function ($join) {
+                $join
+                    ->on(
+                        'pp2.strukresepfk',
+                        '=',
+                        'pp.strukresepfk'
+                    )
+                    ->on(
+                        'pp2.produkfk',
+                        '=',
+                        'pp.produkfk'
+                    )
+                    ->where(
+                        'pp.iskronis',
+                        true
+                    );
+            }
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | APD
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'antrianpasiendiperiksa_t as apd',
-                'apd.norec',
-                '=',
-                'pp.noregistrasifk'
-            )
+        ->join(
+            'antrianpasiendiperiksa_t as apd',
+            'apd.norec',
+            '=',
+            'pp.noregistrasifk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Ruangan Pelayanan
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'ruangan_m as ru',
-                'ru.id',
-                '=',
-                'apd.objectruanganfk'
-            )
+        ->join(
+            'ruangan_m as ru',
+            'ru.id',
+            '=',
+            'apd.objectruanganfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Jenis Kemasan
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'jeniskemasan_m as jk',
-                'jk.id',
-                '=',
-                'pp.jeniskemasanfk'
-            )
+        ->join(
+            'jeniskemasan_m as jk',
+            'jk.id',
+            '=',
+            'pp.jeniskemasanfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Route Farmasi
         |--------------------------------------------------------------------------
         */
-            ->leftJoin(
-                'routefarmasi as rt',
-                'rt.id',
-                '=',
-                'pp.routefk'
-            )
+        ->leftJoin(
+            'routefarmasi as rt',
+            'rt.id',
+            '=',
+            'pp.routefk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Produk / Obat
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'produk_m as pr',
-                'pr.id',
-                '=',
-                'pp.produkfk'
-            )
+        ->join(
+            'produk_m as pr',
+            'pr.id',
+            '=',
+            'pp.produkfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Satuan Standar Produk
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'satuanstandar_m as ss',
-                'ss.id',
-                '=',
-                'pr.objectsatuanstandarfk'
-            )
+        ->join(
+            'satuanstandar_m as ss',
+            'ss.id',
+            '=',
+            'pr.objectsatuanstandarfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Satuan View
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'satuanstandar_m as ss2',
-                'ss2.id',
-                '=',
-                'pp.satuanviewfk'
-            )
+        ->join(
+            'satuanstandar_m as ss2',
+            'ss2.id',
+            '=',
+            'pp.satuanviewfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Satuan Resep
         |--------------------------------------------------------------------------
         */
-            ->leftJoin(
-                'satuanresep_m as sn',
-                'sn.id',
-                '=',
-                'pp.satuanresepfk'
-            )
+        ->leftJoin(
+            'satuanresep_m as sn',
+            'sn.id',
+            '=',
+            'pp.satuanresepfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Stok Produk
         |--------------------------------------------------------------------------
         */
-            ->join(
-                'stokprodukdetail_t as spd',
-                'spd.norec',
-                '=',
-                'pp.stokprodukdetailfk'
-            )
+        ->join(
+            'stokprodukdetail_t as spd',
+            'spd.norec',
+            '=',
+            'pp.stokprodukdetailfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Asal Produk
         |--------------------------------------------------------------------------
-        |
-        | spd.objectasalprodukfk
-        |              ↓
-        | asalproduk_m.id
-        |
         */
-            ->leftJoin(
-                'asalproduk_m as asp',
-                'asp.id',
-                '=',
-                'spd.objectasalprodukfk'
-            )
+        ->leftJoin(
+            'asalproduk_m as asp',
+            'asp.id',
+            '=',
+            'spd.objectasalprodukfk'
+        )
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | SELECT
         |--------------------------------------------------------------------------
         */
-            ->select(
+        ->select(
 
-                /*
+            /*
             |--------------------------------------------------------------------------
             | Header Resep
             |--------------------------------------------------------------------------
             */
-                'sr.norec as norec_resep',
-                'sr.tglresep',
-                'sr.noresep',
+            'sr.norec as norec_resep',
 
-                /*
+            'sr.noregistrasi',
+
+            'sr.tglresep',
+
+            'sr.noresep',
+
+            /*
             |--------------------------------------------------------------------------
             | Verifikasi Resep
             |--------------------------------------------------------------------------
             */
-                'sr.tepatpasien',
-                'sr.tepatobat',
-                'sr.isbmhp',
-                'sr.campuranobat',
-                'sr.tepatdosis',
-                'sr.tepatrute',
-                'sr.duplikasiobat',
-                'sr.interaksiobat',
-                'sr.jenisobatl5',
-                'sr.kontraindikasi',
+            'sr.tepatpasien',
 
-                /*
+            'sr.tepatobat',
+
+            'sr.isbmhp',
+
+            'sr.campuranobat',
+
+            'sr.tepatdosis',
+
+            'sr.tepatrute',
+
+            'sr.duplikasiobat',
+
+            'sr.interaksiobat',
+
+            'sr.jenisobatl5',
+
+            'sr.kontraindikasi',
+
+            /*
             |--------------------------------------------------------------------------
             | Dokter / Penulis
             |--------------------------------------------------------------------------
             */
-                'pg.id as pgid',
-                'pg.namalengkap',
+            'pg.id as pgid',
 
-                /*
+            'pg.namalengkap',
+
+            /*
             |--------------------------------------------------------------------------
             | Ruangan Resep
             |--------------------------------------------------------------------------
             */
-                'ru2.id as ruidresep',
-                'ru2.namaruangan as ruanganresep',
+            'ru2.id as ruidresep',
 
-                /*
+            'ru2.namaruangan as ruanganresep',
+
+            /*
             |--------------------------------------------------------------------------
             | Pelayanan Pasien
             |--------------------------------------------------------------------------
             */
-                'pp.norec as norecpp',
-                'pp.noregistrasifk',
+            'pp.norec as norecpp',
 
-                'pp.tglregistrasi',
-                'pp.tglpemakaian',
-                'pp.tglkadaluarsa',
+            'pp.noregistrasifk',
 
-                'pp.rke',
+            'pp.tglregistrasi',
 
-                /*
+            'pp.tglpemakaian',
+
+            'pp.tglkadaluarsa',
+
+            'pp.rke',
+
+            /*
             |--------------------------------------------------------------------------
             | Jenis Kemasan
             |--------------------------------------------------------------------------
             */
-                'pp.jeniskemasanfk',
+            'pp.jeniskemasanfk',
 
-                'jk.id as jkid',
-                'jk.jeniskemasan',
+            'jk.id as jkid',
 
-                /*
+            'jk.jeniskemasan',
+
+            /*
             |--------------------------------------------------------------------------
             | Aturan Pakai / Route
             |--------------------------------------------------------------------------
             */
-                'pp.aturanpakai',
+            'pp.aturanpakai',
 
-                'pp.routefk',
-                'rt.name as route',
+            'pp.routefk',
 
-                /*
+            'rt.name as route',
+
+            /*
             |--------------------------------------------------------------------------
             | Produk
             |--------------------------------------------------------------------------
             */
-                'pp.produkfk',
+            'pp.produkfk',
 
-                'pr.kdproduk',
-                'pr.namaproduk',
-                'pr.namaproduk as productname',
+            'pr.kdproduk',
 
-                /*
+            'pr.namaproduk',
+
+            'pr.namaproduk as productname',
+
+            /*
             |--------------------------------------------------------------------------
             | BPJS Obat
             |--------------------------------------------------------------------------
             */
-                'pr.namaobatbpjs',
-                'pr.kdobatbpjs as kodeobatbpjs',
-                'pr.jenisapotik as jenisobatbpjs',
+            'pr.namaobatbpjs',
 
-                /*
+            'pr.kdobatbpjs as kodeobatbpjs',
+
+            'pr.jenisapotik as jenisobatbpjs',
+
+            /*
             |--------------------------------------------------------------------------
             | Konversi / Satuan
             |--------------------------------------------------------------------------
             */
-                'pp.nilaikonversi',
+            'pp.nilaikonversi',
 
-                'pr.objectsatuanstandarfk',
-                'ss.satuanstandar',
+            'pr.objectsatuanstandarfk',
 
-                'pp.satuanviewfk',
-                'ss2.satuanstandar as ssview',
+            'ss.satuanstandar',
 
-                'pp.satuanresepfk',
-                'sn.satuanresep',
+            'pp.satuanviewfk',
 
-                /*
+            'ss2.satuanstandar as ssview',
+
+            'pp.satuanresepfk',
+
+            'sn.satuanresep',
+
+            /*
             |--------------------------------------------------------------------------
             | Jumlah
             |--------------------------------------------------------------------------
             */
-                'pp.jumlah',
-                'pp.qtydetailresep',
+            'pp.jumlah',
 
-                /*
+            'pp.qtydetailresep',
+
+            /*
             |--------------------------------------------------------------------------
             | Dosis
             |--------------------------------------------------------------------------
             */
-                'pp.dosis',
-                'pr.kekuatan',
+            'pp.dosis',
 
-                /*
+            'pr.kekuatan',
+
+            /*
             |--------------------------------------------------------------------------
             | Racikan
             |--------------------------------------------------------------------------
             */
-                'pp.jenisracikanfk',
-                'pp.racikan',
+            'pp.jenisracikanfk',
 
-                /*
+            'pp.racikan',
+
+            /*
             |--------------------------------------------------------------------------
             | Jadwal Konsumsi
             |--------------------------------------------------------------------------
             */
-                'pp.ispagi',
-                'pp.issiang',
-                'pp.ismalam',
-                'pp.issore',
+            'pp.ispagi',
 
-                /*
+            'pp.issiang',
+
+            'pp.ismalam',
+
+            'pp.issore',
+
+            /*
             |--------------------------------------------------------------------------
-            | Keterangan
+            | Keterangan Pakai
             |--------------------------------------------------------------------------
             */
-                'pp.keteranganpakai',
+            'pp.keteranganpakai',
 
-                /*
+            /*
             |--------------------------------------------------------------------------
             | Kronis / Donasi / BUD
             |--------------------------------------------------------------------------
             */
-                'pp.iskronis',
-                'pp.isdonasi',
-                'pp.isbud',
+            'pp.iskronis',
 
-                /*
+            'pp.isdonasi',
+
+            'pp.isbud',
+
+            /*
             |--------------------------------------------------------------------------
             | Jenis Obat
             |--------------------------------------------------------------------------
             */
-                'pp.jenisobatfk',
+            'pp.jenisobatfk',
 
-                /*
+            /*
             |--------------------------------------------------------------------------
             | Harga
             |--------------------------------------------------------------------------
             */
-                'pp.hargasatuan',
-                'pp.hargadiscount',
-                'pp.persendiscount',
-                'pp.hargajual',
-                'pp.jasa',
+            'pp.hargasatuan',
 
-                /*
+            'pp.hargadiscount',
+
+            'pp.persendiscount',
+
+            'pp.hargajual',
+
+            'pp.jasa',
+
+            /*
             |--------------------------------------------------------------------------
             | Struk Terima
             |--------------------------------------------------------------------------
             */
-                'pp.strukterimafk',
+            'pp.strukterimafk',
 
-                /*
+            /*
             |--------------------------------------------------------------------------
             | Stock
             |--------------------------------------------------------------------------
             */
-                'pp.stock',
+            'pp.stock',
 
-                'pp.stokprodukdetailfk as norec_spd',
+            'pp.stokprodukdetailfk as norec_spd',
 
-                'spd.objectasalprodukfk',
-                'spd.qtyproduk as jmlstok',
+            'spd.objectasalprodukfk',
 
-                /*
+            'spd.qtyproduk as jmlstok',
+
+            /*
             |--------------------------------------------------------------------------
             | Asal Produk
             |--------------------------------------------------------------------------
             */
-                'asp.id as asalprodukfk',
-                'asp.asalproduk',
+            'asp.id as asalprodukfk',
 
-                /*
+            'asp.asalproduk',
+
+            /*
             |--------------------------------------------------------------------------
             | Obat Kronis
             |--------------------------------------------------------------------------
             */
-                'pp2.norec as norecpp2',
-                'pp2.jumlah as jumlah2',
+            'pp2.norec as norecpp2',
 
-                /*
+            'pp2.jumlah as jumlah2',
+
+            /*
             |--------------------------------------------------------------------------
             | APD
             |--------------------------------------------------------------------------
             */
-                'apd.objectruanganfk',
-                'apd.objectkelasfk as kelasfk',
+            'apd.objectruanganfk',
 
-                /*
+            'apd.objectkelasfk as kelasfk',
+
+            /*
             |--------------------------------------------------------------------------
             | Ruangan Pelayanan
             |--------------------------------------------------------------------------
             */
-                'ru.namaruangan'
-            )
-
-            /*
-        |--------------------------------------------------------------------------
-        | Filter Profile
-        |--------------------------------------------------------------------------
-        */
-           
-
-            /*
-        |--------------------------------------------------------------------------
-        | Filter Resep
-        |--------------------------------------------------------------------------
-        */
-            ->where(
-                'sr.noresep',
-                $noResep
-            )
-
-            /*
-        |--------------------------------------------------------------------------
-        | Urutan Obat
-        |--------------------------------------------------------------------------
-        */
-            ->orderBy(
-                'pp.rke',
-                'asc'
-            )
-
-            ->orderBy(
-                'pp.tglpelayanan',
-                'asc'
-            )
-
-            ->get();
+            'ru.namaruangan'
+        )
 
         /*
+        |--------------------------------------------------------------------------
+        | Filter Berdasarkan Nomor Registrasi
+        |--------------------------------------------------------------------------
+        |
+        | BUKAN:
+        |
+        | sr.noresep = ...
+        |
+        | Tetapi:
+        |
+        | sr.noregistrasi = 2608310650
+        |
+        */
+        ->where(
+            'sr.noregistrasi',
+            $noregistrasi
+        )
+
+        /*
+        |--------------------------------------------------------------------------
+        | Urutkan Resep
+        |--------------------------------------------------------------------------
+        |
+        | Karena dalam satu noregistrasi bisa terdapat lebih dari
+        | satu strukresep_t.
+        |
+        */
+        ->orderBy(
+            'sr.tglresep',
+            'asc'
+        )
+
+        ->orderBy(
+            'sr.noresep',
+            'asc'
+        )
+
+        ->orderBy(
+            'pp.rke',
+            'asc'
+        )
+
+        ->orderBy(
+            'pp.tglpelayanan',
+            'asc'
+        )
+
+        ->get();
+
+
+    /*
     |--------------------------------------------------------------------------
-    | Jika Tidak Ada Data
+    | Jika Tidak Ada Resep
     |--------------------------------------------------------------------------
     */
-        if ($data->isEmpty()) {
-            return $this->respond([
-                'detailresep' => [],
-                'pelayananPasien' => [],
-                'message' => 'Data resep tidak ditemukan.',
-            ]);
-        }
+    if ($data->isEmpty()) {
 
-        /*
-    |--------------------------------------------------------------------------
-    | Header Resep
-    |--------------------------------------------------------------------------
-    */
-        $first = $data->first();
+        return response()->json([
+            'noregistrasi' => $noregistrasi,
 
-        $dataStruk = [
-            'pgid' => $first->pgid,
-            'namalengkap' => $first->namalengkap,
+            'detailresep' => null,
 
-            'id' => $first->ruidresep,
-            'namaruangan' => $first->ruanganresep,
+            'daftarResep' => [],
 
-            'tglresep' => $first->tglresep,
-            'noresep' => $first->noresep,
-        ];
+            'pelayananPasien' => [],
 
-        /*
+            'message' =>
+                'Resep tidak ditemukan untuk nomor registrasi tersebut.',
+        ], 200);
+    }
+
+
+    /*
     |--------------------------------------------------------------------------
     | Mapping Detail Obat
     |--------------------------------------------------------------------------
     */
-        foreach ($data as $index => $item) {
+    foreach ($data as $index => $item) {
 
-            /*
+        /*
         |--------------------------------------------------------------------------
         | Nilai Dasar
         |--------------------------------------------------------------------------
         */
-            $jumlah = (float) (
-                $item->jumlah ?? 0
-            );
+        $jumlah = (float) (
+            $item->jumlah ?? 0
+        );
 
-            $hargaSatuan = (float) (
-                $item->hargasatuan ?? 0
-            );
+        $hargaSatuan = (float) (
+            $item->hargasatuan ?? 0
+        );
 
-            $hargaDiscount = (float) (
-                $item->hargadiscount ?? 0
-            );
+        $hargaDiscount = (float) (
+            $item->hargadiscount ?? 0
+        );
 
-            $jasa = (float) (
-                $item->jasa ?? 0
-            );
+        $jasa = (float) (
+            $item->jasa ?? 0
+        );
 
-            $nilaiKonversi = (float) (
-                $item->nilaikonversi ?? 1
-            );
+        $nilaiKonversi = (float) (
+            $item->nilaikonversi ?? 1
+        );
 
-            $dosis = (float) (
-                $item->dosis ?? 0
-            );
+        $dosis = (float) (
+            $item->dosis ?? 0
+        );
 
-            $kekuatan = (float) (
-                $item->kekuatan ?? 0
-            );
+        $kekuatan = (float) (
+            $item->kekuatan ?? 0
+        );
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
-        | Antisipasi Nilai Konversi 0
+        | Antisipasi Nilai Konversi Nol
         |--------------------------------------------------------------------------
         */
-            if ($nilaiKonversi <= 0) {
-                $nilaiKonversi = 1;
-            }
+        if ($nilaiKonversi <= 0) {
+            $nilaiKonversi = 1;
+        }
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Jumlah Setelah Konversi
         |--------------------------------------------------------------------------
         */
-            $jumlahKonversi =
-                $jumlah / $nilaiKonversi;
+        $jumlahKonversi =
+            $jumlah / $nilaiKonversi;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Subtotal
         |--------------------------------------------------------------------------
         */
-            $subtotal =
-                $jumlah *
-                (
-                    $hargaSatuan -
-                    $hargaDiscount
-                );
+        $subtotal =
+            $jumlah
+            * (
+                $hargaSatuan
+                - $hargaDiscount
+            );
 
-            /*
+
+        /*
+        |--------------------------------------------------------------------------
+        | Donasi
+        |--------------------------------------------------------------------------
+        */
+        $isDonasi =
+            $item->isdonasi === true
+            || $item->isdonasi === 1
+            || $item->isdonasi === '1'
+            || $item->isdonasi === 'true'
+            || $item->isdonasi === 't';
+
+
+        /*
         |--------------------------------------------------------------------------
         | Total
         |--------------------------------------------------------------------------
-        |
-        | Jika donasi maka total = 0.
-        |
         */
-            $isDonasi =
-                $item->isdonasi === true ||
-                $item->isdonasi === 1 ||
-                $item->isdonasi === '1' ||
-                $item->isdonasi === 'true' ||
-                $item->isdonasi === 't';
+        if ($isDonasi) {
 
-            if ($isDonasi) {
-                $totalItem = 0;
-            } else {
-                $totalItem =
-                    $subtotal + $jasa;
-            }
+            $totalItem = 0;
 
-            /*
+        } else {
+
+            $totalItem =
+                $subtotal
+                + $jasa;
+        }
+
+
+        /*
         |--------------------------------------------------------------------------
-        | Perhitungan Dosis
+        | Jumlah Makan / Dosis
         |--------------------------------------------------------------------------
         */
-            $jumlahMakan = 0;
+        $jumlahMakan = 0;
 
-            if (
-                $dosis > 0 &&
-                $nilaiKonversi > 0
-            ) {
-                $jumlahMakan =
+        if (
+            $dosis > 0
+            && $nilaiKonversi > 0
+        ) {
+            $jumlahMakan =
+                (
                     (
-                        (
-                            $jumlah /
-                            $nilaiKonversi
-                        ) /
-                        $dosis
+                        $jumlah
+                        / $nilaiKonversi
                     )
-                    * $kekuatan;
-            }
+                    / $dosis
+                )
+                * $kekuatan;
+        }
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Nomor Urut
         |--------------------------------------------------------------------------
         */
-            $item->no =
-                $index + 1;
+        $item->no =
+            $index + 1;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Generik
         |--------------------------------------------------------------------------
         */
-            $item->generik =
-                null;
+        $item->generik =
+            null;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Stock
         |--------------------------------------------------------------------------
         */
-            $item->stock =
-                (float) (
-                    $item->jmlstok ?? 0
-                );
+        $item->stock =
+            (float) (
+                $item->jmlstok ?? 0
+            );
 
-            $item->jmlstok =
-                $item->stock;
+        $item->jmlstok =
+            $item->stock;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Harga
         |--------------------------------------------------------------------------
         */
-            $item->harganetto =
-                $hargaSatuan;
+        $item->harganetto =
+            $hargaSatuan;
 
-            $item->hargasatuan =
-                $hargaSatuan;
+        $item->hargasatuan =
+            $hargaSatuan;
 
-            $item->hargadiscount =
-                $hargaDiscount;
+        $item->hargadiscount =
+            $hargaDiscount;
 
-            $item->hargajual =
-                (float) (
-                    $item->hargajual ?? 0
-                );
+        $item->hargajual =
+            (float) (
+                $item->hargajual ?? 0
+            );
 
-            /*
-        |--------------------------------------------------------------------------
-        | Total
-        |--------------------------------------------------------------------------
-        */
-            $item->total =
-                $totalItem;
+        $item->total =
+            $totalItem;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Struk Terima
         |--------------------------------------------------------------------------
         */
-            $item->nostrukterimafk =
-                $item->strukterimafk;
+        $item->nostrukterimafk =
+            $item->strukterimafk;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Ruangan
         |--------------------------------------------------------------------------
         */
-            $item->ruanganfk =
-                $item->ruidresep;
+        $item->ruanganfk =
+            $item->ruidresep;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Asal Produk
         |--------------------------------------------------------------------------
-        |
-        | Sudah langsung dari:
-        | asalproduk_m
-        |
         */
-            $item->asalprodukfk =
-                $item->asalprodukfk
-                ?? $item->objectasalprodukfk;
+        $item->asalprodukfk =
+            $item->asalprodukfk
+            ?? $item->objectasalprodukfk;
 
-            $item->asalproduk =
-                $item->asalproduk
-                ?? '';
+        $item->asalproduk =
+            $item->asalproduk
+            ?? '';
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Satuan
         |--------------------------------------------------------------------------
         */
-            $item->satuanstandarfk =
-                $item->satuanviewfk;
+        $item->satuanstandarfk =
+            $item->satuanviewfk;
 
-            $item->satuanstandar =
-                $item->ssview;
+        $item->satuanstandar =
+            $item->ssview;
 
-            $item->satuanview =
-                $item->ssview;
+        $item->satuanview =
+            $item->ssview;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Nama Produk
         |--------------------------------------------------------------------------
         */
-            $item->kode_namaproduk =
-                $item->kdproduk
-                . ' - '
-                . $item->namaproduk;
+        $item->kode_namaproduk =
+            $item->kdproduk
+            . ' - '
+            . $item->namaproduk;
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Jumlah
         |--------------------------------------------------------------------------
         */
-            $item->jumlah =
-                $jumlahKonversi;
+        $item->jumlah =
+            $jumlahKonversi;
 
-            $item->jumlahobat =
-                (float) (
-                    $item->qtydetailresep ?? 0
-                );
+        $item->jumlahobat =
+            (float) (
+                $item->qtydetailresep ?? 0
+            );
 
-            /*
+
+        /*
         |--------------------------------------------------------------------------
         | Jumlah Dosis
         |--------------------------------------------------------------------------
         */
-            $item->jmldosis =
-                (string) $jumlahMakan
-                . '/'
-                . (string) $dosis
-                . '/'
-                . (string) $kekuatan;
+        $item->jmldosis =
+            (string) $jumlahMakan
+            . '/'
+            . (string) $dosis
+            . '/'
+            . (string) $kekuatan;
 
-            /*
-        |--------------------------------------------------------------------------
-        | Keterangan
-        |--------------------------------------------------------------------------
-        */
-            $item->keterangan =
-                $item->keteranganpakai;
-        }
 
         /*
+        |--------------------------------------------------------------------------
+        | Keterangan / Aturan Pakai
+        |--------------------------------------------------------------------------
+        */
+        $item->keterangan =
+            $item->keteranganpakai;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Daftar Header Resep
+    |--------------------------------------------------------------------------
+    |
+    | Satu registrasi dapat memiliki:
+    |
+    | noresep A
+    | noresep B
+    | noresep C
+    |
+    | Karena itu header dibuat per norec_resep.
+    |
+    */
+    $daftarResep = $data
+        ->groupBy('norec_resep')
+        ->map(function ($items) {
+
+            $first = $items->first();
+
+            return [
+                'norec_resep' =>
+                    $first->norec_resep,
+
+                'noregistrasi' =>
+                    $first->noregistrasi,
+
+                'noresep' =>
+                    $first->noresep,
+
+                'tglresep' =>
+                    $first->tglresep,
+
+                'pgid' =>
+                    $first->pgid,
+
+                'namalengkap' =>
+                    $first->namalengkap,
+
+                'id' =>
+                    $first->ruidresep,
+
+                'namaruangan' =>
+                    $first->ruanganresep,
+
+                'jumlah_obat' =>
+                    $items->count(),
+            ];
+        })
+        ->values();
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Header Utama
+    |--------------------------------------------------------------------------
+    |
+    | Dipertahankan supaya frontend lama yang membaca detailresep
+    | masih tetap dapat digunakan.
+    |
+    */
+    $first = $data->first();
+
+    $dataStruk = [
+        'noregistrasi' =>
+            $first->noregistrasi,
+
+        'norec_resep' =>
+            $first->norec_resep,
+
+        'noresep' =>
+            $first->noresep,
+
+        'tglresep' =>
+            $first->tglresep,
+
+        'pgid' =>
+            $first->pgid,
+
+        'namalengkap' =>
+            $first->namalengkap,
+
+        'id' =>
+            $first->ruidresep,
+
+        'namaruangan' =>
+            $first->ruanganresep,
+
+        'jumlah_resep' =>
+            $daftarResep->count(),
+
+        'jumlah_obat' =>
+            $data->count(),
+    ];
+
+
+    /*
     |--------------------------------------------------------------------------
     | Response
     |--------------------------------------------------------------------------
     */
-        $result = [
-            'detailresep' =>
+    $result = [
+        'noregistrasi' =>
+            $noregistrasi,
+
+        /*
+         * Header resep pertama.
+         * Dipertahankan untuk kompatibilitas.
+         */
+        'detailresep' =>
             $dataStruk,
 
-            'pelayananPasien' =>
+        /*
+         * Seluruh resep dalam registrasi.
+         */
+        'daftarResep' =>
+            $daftarResep,
+
+        /*
+         * Seluruh obat dari seluruh resep.
+         */
+        'pelayananPasien' =>
             $data,
 
-            'message' =>
-            'as@epic',
-        ];
- return response()->json($result, 200);
-        
-    }
+        'message' =>
+            'Data resep berhasil ditemukan.',
+    ];
+
+
+    return response()->json(
+        $result,
+        200
+    );
+}
 }
