@@ -67,10 +67,10 @@ Route::prefix('service')
             '/getdatariwayatreservasi',
             [ReservasiController::class, 'getDataRiwayatReservasi']
         );
-          Route::get(
-            '/getdatariwayatreservasi',
-            [ReservasiController::class, 'getDataRiwayatReservasi']
-        );
+        //   Route::get(
+        //     '/getdatariwayatreservasi',
+        //     [ReservasiController::class, 'getDataRiwayatReservasi']
+        // );
          Route::get(
             '/listriwayatregistrasipasien',
             [ReservasiController::class, 'listRiwayatRegistrasiPasien']
