@@ -88,6 +88,8 @@ return [
             'charset' => 'utf8',
             'prefix' => '',
             'prefix_indexes' => true,
+            'encrypt' => env('DB_ENCRYPT', 'yes'),
+            'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', true),
         ],
         'sqlsrv_lis' => [
             'driver' => 'sqlsrv',
@@ -100,6 +102,8 @@ return [
             'charset' => 'utf8',
             'prefix' => '',
             'prefix_indexes' => true,
+            'encrypt' => env('DB_ENCRYPT_LIS', 'yes'),
+            'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE_LIS', true),
         ],
           'sqlsrv_ris' => [
             'driver' => 'sqlsrv',
@@ -112,6 +116,8 @@ return [
             'charset' => 'utf8',
             'prefix' => '',
             'prefix_indexes' => true,
+            'encrypt' => env('DB_ENCRYPT_RIS', 'yes'),
+            'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE_RIS', true),
         ],
         'mongodb' => [
             'driver' => 'mongodb',
