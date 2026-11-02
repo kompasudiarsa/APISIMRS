@@ -59,6 +59,10 @@ Route::prefix('service')
             [SIMRSController::class, 'getDataRL3_2']
         );
         Route::get(
+            '/getdatariwayatRI',
+            [SIMRSController::class, 'getDataRiwayatRI']
+        );
+        Route::get(
             '/getriwayatreservasi',
             [ReservasiController::class, 'getRiwayatReservasi']
         );

@@ -30,4 +30,11 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'bpjs_vclaim' => [
+        'base_url' => env('BPJS_VCLAIM_BASE_URL'),
+        'cons_id' => env('BPJS_CONS_ID'),
+        'secret_key' => env('BPJS_SECRET_KEY'),
+        'user_key' => env('BPJS_USER_KEY'),
+    ],
+
 ];

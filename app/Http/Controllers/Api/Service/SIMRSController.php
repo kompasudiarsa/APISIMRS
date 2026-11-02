@@ -5235,4 +5235,159 @@ class SIMRSController extends Controller
         200
     );
 }
+    
+public function getDataRiwayatRI(Request $request)
+{
+    $validated = $request->validate([
+        'tanggal'   => 'required|date_format:Y-m-d',
+        'ruanganfk' => 'required|integer|min:1',
+        'limit'     => 'nullable|integer|min:1|max:500',
+    ]);
+
+    $tanggal = Carbon::createFromFormat(
+        '!Y-m-d',
+        $validated['tanggal']
+    );
+
+    $tanggalAwal = $tanggal->format('Y-m-d 00:00:00');
+
+    $tanggalAkhir = $tanggal->copy()
+        ->addDay()
+        ->format('Y-m-d 00:00:00');
+
+    $ruanganId = (int) $validated['ruanganfk'];
+    $limit = (int) ($validated['limit'] ?? 50);
+
+    try {
+
+        // Subquery: pilih APD yang aktif dan berada
+        // di ruangan pada tanggal yang ditentukan.
+        $subquery = DB::table('antrianpasiendiperiksa_t as a')
+            ->select([
+                'a.noregistrasifk',
+                'a.objectruanganfk',
+            ])
+            ->selectRaw('MIN(a.tglmasuk) AS tglmasuk')
+            ->selectRaw('MAX(a.tglkeluar) AS tglkeluar')
+            ->selectRaw('MIN(a.norec::text) AS norec_apd')
+            ->selectRaw('COUNT(*) AS jumlah_record_apd')
+            ->selectRaw("
+                CASE
+                    WHEN COUNT(*) FILTER (
+                        WHERE a.tglkeluar IS NULL
+                    ) > 0
+                    THEN 'BELUM KELUAR'
+                    ELSE 'SUDAH KELUAR'
+                END AS status_keluar
+            ")
+            ->where('a.statusenabled', true)
+            ->where('a.objectruanganfk', $ruanganId)
+
+            // Pasien masuk sebelum akhir tanggal
+            ->where('a.tglmasuk', '<', $tanggalAkhir)
+
+            // Belum keluar atau keluar setelah
+            // awal tanggal yang dicari
+            ->where(function ($q) use ($tanggalAwal) {
+                $q->whereNull('a.tglkeluar')
+                  ->orWhere(
+                      'a.tglkeluar',
+                      '>=',
+                      $tanggalAwal
+                  );
+            })
+            ->groupBy(
+                'a.noregistrasifk',
+                'a.objectruanganfk'
+            );
+
+        // Query utama
+        $query = DB::table('pasiendaftar_t as pd')
+            ->joinSub($subquery, 'apd', function ($join) {
+                $join->on(
+                    'apd.noregistrasifk',
+                    '=',
+                    'pd.norec'
+                );
+            })
+            ->leftJoin(
+                'ruangan_m as ru_apd',
+                'apd.objectruanganfk',
+                '=',
+                'ru_apd.id'
+            )
+            ->leftJoin(
+                'ruangan_m as ru_last',
+                'pd.objectruanganlastfk',
+                '=',
+                'ru_last.id'
+            )
+            ->leftJoin(
+                'ruangan_m as rulast',
+                'pd.objectruanganasalfk',
+                '=',
+                'rulast.id'
+            )
+            ->leftJoin(
+                'pasien_m as ps',
+                'ps.id',
+                '=',
+                'pd.nocmfk'
+            )
+            ->leftJoin(
+                'pegawai_m as pg2',
+                'pd.objectpegawairawatbersamafk',
+                '=',
+                'pg2.id'
+            )
+            ->select([
+                'ps.nocm',
+                'ps.namapasien',
+                'apd.norec_apd',
+                'ru_apd.namaruangan as ruanganDiTanggalItu',
+                'ru_last.namaruangan as ruanganSekarang',
+                'rulast.namaruangan as ruanganAsal',
+                'pg2.namalengkap',
+                'pd.norec as norec_pd',
+                'pd.nocmfk',
+                'apd.tglmasuk',
+                'apd.tglkeluar',
+                'apd.status_keluar',
+                'apd.jumlah_record_apd',
+                'pd.objectruanganlastfk',
+                'pd.objectpegawaifk',
+                'pd.objectpegawairawatbersamafk',
+                'pd.noregistrasi',
+            ])
+            ->orderBy('apd.tglmasuk', 'asc')
+            ->orderBy('pd.norec', 'asc');
+
+        $data = $query->limit($limit)->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Data riwayat rawat inap berhasil diambil',
+            'filter' => [
+                'tanggal' => $validated['tanggal'],
+                'tanggal_awal' => $tanggalAwal,
+                'tanggal_akhir' => $tanggalAkhir,
+                'ruanganfk' => $ruanganId,
+                'limit' => $limit,
+            ],
+            'total' => $data->count(),
+            'data' => $data,
+        ], 200);
+
+    } catch (\Throwable $e) {
+        report($e);
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal mengambil data riwayat rawat inap.',
+        ], 500);
+    }
+}
+
+
+
 }

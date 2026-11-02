@@ -8013,6 +8013,44 @@ class ReservasiController extends Controller
             | Response
             |--------------------------------------------------------------------------
             */
+            /*
+            |--------------------------------------------------------------------------
+            | STEP 13 - Verifikasi masa berlaku rujukan BPJS
+            |--------------------------------------------------------------------------
+            | Tidak mengubah status pelayanan/antrean. Hanya memperkaya respons.
+            */
+            // Saat data berasal dari fallback APD/PD, nomor rujukan mungkin
+            // belum terbawa ke object reservasi. Ambil dari APR yang benar-benar
+            // terkait dengan registrasi (jangan mengambil APR pasien secara acak).
+            $nomorRujukan = trim((string) ($reservasi->norujukan ?? ''));
+            if ($nomorRujukan === '' && $registrasi) {
+                $norecApr = data_get($registrasi, 'antrianpasienregistrasifk');
+                if (!empty($norecApr)) {
+                    $aprRujukan = $db->table('antrianpasienregistrasi_t')
+                        ->where('norec', $norecApr)
+                        ->where('kdprofile', $kdProfile)
+                        ->where('statusenabled', true)
+                        ->first(['norujukan', 'nosuratkontrol']);
+
+                    $nomorRujukan = trim((string) data_get($aprRujukan, 'norujukan', ''));
+                    if ($nomorRujukan !== '') {
+                        $reservasi->norujukan = $nomorRujukan;
+                    }
+                    if (empty($reservasi->nosuratkontrol)) {
+                        $reservasi->nosuratkontrol = data_get($aprRujukan, 'nosuratkontrol');
+                    }
+                }
+            }
+
+            $informasiRujukan = $this->cekMasaBerlakuRujukanNadi(
+                $nomorRujukan,
+                $reservasi->tanggalreservasi ?? null
+            );
+
+            foreach ($informasiRujukan as $namaKolom => $nilaiKolom) {
+                $reservasi->{$namaKolom} = $nilaiKolom;
+            }
+
             return response()->json([
                 'total' => 1,
 
@@ -8024,4 +8062,188 @@ class ReservasiController extends Controller
             ], 200);
         }
     }
+
+
+    /**
+     * Verifikasi nomor rujukan FKRTL/RS menggunakan VClaim.
+     * Berlaku 90 hari kalender (tanggal awal dihitung sebagai hari pertama).
+     * Kebijakan 90 hari dan sumber tanggal perlu dikonfirmasi dengan operasional BPJS.
+     */
+    private function cekMasaBerlakuRujukanNadi($nomorRujukan, $tanggalReservasi = null): array
+    {
+        $default = [
+            'tanggal_kunjungan_rujukan' => null,
+            'tanggal_akhir_rujukan' => null,
+            'sisa_hari_rujukan' => null,
+            'status_rujukan' => 'TIDAK_ADA_RUJUKAN',
+            'status_rujukan_saat_reservasi' => null,
+            'pesan_rujukan' => null,
+        ];
+
+        $nomorRujukan = trim((string) $nomorRujukan);
+        if ($nomorRujukan === '' || strtolower($nomorRujukan) === 'null') {
+            return $default;
+        }
+
+        $default['status_rujukan'] = 'TIDAK_DAPAT_DIVERIFIKASI';
+        $hasil = $this->ambilRujukanBpjsRsNadi($nomorRujukan);
+     
+        $tanggalKunjungan = data_get($hasil, 'rujukan.tglKunjungan');
+        if (!$tanggalKunjungan) {
+            $default['pesan_rujukan'] = $hasil['pesan'] ?? 'Tanggal kunjungan tidak ditemukan di BPJS';
+            return $default;
+        }
+
+        try {
+            $awal = \Carbon\Carbon::createFromFormat('!Y-m-d', substr((string) $tanggalKunjungan, 0, 10));
+            if (!$awal || $awal->format('Y-m-d') !== substr((string) $tanggalKunjungan, 0, 10)) {
+                throw new \InvalidArgumentException('Tanggal tidak valid');
+            }
+            $akhir = $awal->copy()->addDays(89);
+            $hariIni = \Carbon\Carbon::today('Asia/Makassar');
+            $default['tanggal_kunjungan_rujukan'] = $awal->toDateString();
+            $default['tanggal_akhir_rujukan'] = $akhir->toDateString();
+            $default['sisa_hari_rujukan'] = (int) $hariIni->diffInDays($akhir, false);
+            $default['status_rujukan'] = $hariIni->lt($awal)
+                ? 'BELUM_BERLAKU'
+                : ($hariIni->lte($akhir) ? 'AKTIF' : 'KEDALUWARSA');
+
+            if (!empty($tanggalReservasi)) {
+                try {
+                    $tanggal = \Carbon\Carbon::parse($tanggalReservasi)->startOfDay();
+                    $default['status_rujukan_saat_reservasi'] =
+                        ($tanggal->gte($awal) && $tanggal->lte($akhir)) ? 'BERLAKU' : 'TIDAK_BERLAKU';
+                } catch (\Throwable $ignored) {
+                    // Biarkan null jika tanggal reservasi tidak dapat dibaca.
+                }
+            }
+        } catch (\Throwable $e) {
+            $default['pesan_rujukan'] = 'Format tanggal kunjungan rujukan BPJS tidak valid';
+        }
+
+        return $default;
+    }
+
+    /**
+     * Mengambil detail rujukan RS dari BPJS VClaim.
+     * Memerlukan config services.bpjs_vclaim dan paket nullpunkt/lz-string-php.
+     */
+    private function ambilRujukanBpjsRsNadi(string $nomorRujukan): array
+{
+    $consId = trim((string) config('services.bpjs_vclaim.cons_id', env('BPJS_CONS_ID', '')));
+    $secret = trim((string) config('services.bpjs_vclaim.secret_key', env('BPJS_SECRET_KEY', '')));
+    $userKey = trim((string) config('services.bpjs_vclaim.user_key', env('BPJS_USER_KEY', '')));
+    $baseUrl = rtrim(trim((string) config('services.bpjs_vclaim.base_url', env('BPJS_VCLAIM_BASE_URL', ''))), '/');
+    $nomorRujukan = trim($nomorRujukan);
+
+    if ($consId === '' || $secret === '' || $userKey === '' || $baseUrl === '') {
+        return ['pesan' => 'Konfigurasi BPJS VClaim belum lengkap'];
+    }
+    if (!filter_var($baseUrl, FILTER_VALIDATE_URL) || strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME)) !== 'https') {
+        return ['pesan' => 'URL BPJS VClaim harus berupa HTTPS yang valid'];
+    }
+    if (!preg_match('/^[a-zA-Z0-9._-]{5,100}$/', $nomorRujukan)) {
+        return ['pesan' => 'Format nomor rujukan tidak valid'];
+    }
+
+    $cacheKey = 'nadi:rujukan:rs:' . hash('sha256', $nomorRujukan);
+    $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $timestamp = (string) time();
+    $signature = base64_encode(hash_hmac('sha256', $consId . '&' . $timestamp, $secret, true));
+    $url = $baseUrl . '/Rujukan/RS/' . rawurlencode($nomorRujukan);
+
+    try {
+        $http = \Illuminate\Support\Facades\Http::withHeaders([
+                'x-cons-id' => $consId,
+                'x-timestamp' => $timestamp,
+                'x-signature' => $signature,
+                'user_key' => $userKey,
+                'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
+            ])
+            ->withOptions(['connect_timeout' => 10, 'timeout' => 30])
+            ->get($url);
+
+        if (!$http->successful()) {
+            \Illuminate\Support\Facades\Log::warning('NADI VClaim: respons HTTP gagal', [
+                'status' => $http->status(),
+                'content_type' => $http->header('Content-Type'),
+            ]);
+            return ['pesan' => 'HTTP ' . $http->status() . ' dari BPJS'];
+        }
+
+        $json = json_decode($http->body(), true);
+        if (!is_array($json)) {
+            \Illuminate\Support\Facades\Log::warning('NADI VClaim: respons bukan JSON', [
+                'status' => $http->status(),
+                'content_type' => $http->header('Content-Type'),
+                'json_error' => json_last_error_msg(),
+            ]);
+            return ['pesan' => 'Respons BPJS bukan JSON'];
+        }
+
+        $kode = (string) data_get($json, 'metaData.code', '');
+        if ($kode !== '200') {
+            $pesan = (string) data_get($json, 'metaData.message', 'Rujukan tidak ditemukan');
+            \Illuminate\Support\Facades\Log::warning('NADI VClaim: metadata gagal', ['kode' => $kode]);
+            return ['pesan' => 'BPJS ' . $kode . ': ' . $pesan];
+        }
+
+        $payload = data_get($json, 'response');
+        if (is_string($payload)) {
+            if (!class_exists(\LZCompressor\LZString::class)) {
+                return ['pesan' => 'Library LZString belum terpasang'];
+            }
+            $ciphertext = base64_decode($payload, true);
+            if ($ciphertext === false) {
+                return ['pesan' => 'Payload BPJS bukan Base64 valid'];
+            }
+
+            // BPJS: SHA-256 dalam format binary menghasilkan kunci 32 byte dan IV 16 byte.
+            $keyHash = hash('sha256', $consId . $secret . $timestamp, true);
+            $iv = substr($keyHash, 0, 16);
+            $decrypted = openssl_decrypt($ciphertext, 'AES-256-CBC', $keyHash, OPENSSL_RAW_DATA, $iv);
+            if ($decrypted === false) {
+                return ['pesan' => 'Gagal dekripsi AES respons VClaim'];
+            }
+
+            $plain = \LZCompressor\LZString::decompressFromEncodedURIComponent($decrypted);
+            if (!is_string($plain) || $plain === '') {
+                return ['pesan' => 'Gagal dekompresi LZString respons VClaim'];
+            }
+            $payload = json_decode($plain, true);
+            if (!is_array($payload)) {
+                return ['pesan' => 'Hasil dekripsi BPJS bukan JSON valid'];
+            }
+        }
+
+        if (!is_array($payload)) {
+            return ['pesan' => 'Isi respons rujukan BPJS tidak valid'];
+        }
+        $tanggal = data_get($payload, 'rujukan.tglKunjungan');
+        if (!is_string($tanggal) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggal)) {
+            return ['pesan' => 'tglKunjungan tidak ditemukan atau format salah'];
+        }
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $tanggal);
+        if (!$parsed || $parsed->format('Y-m-d') !== $tanggal) {
+            return ['pesan' => 'Tanggal kunjungan BPJS tidak valid'];
+        }
+
+        $hasil = ['rujukan' => ['tglKunjungan' => $tanggal]];
+        \Illuminate\Support\Facades\Cache::put($cacheKey, $hasil, now()->addHours(6));
+        return $hasil;
+    } catch (\Throwable $e) {
+        \Illuminate\Support\Facades\Log::error('NADI VClaim: gagal memproses rujukan', [
+            'jenis_error' => get_class($e),
+            'pesan' => $e->getMessage(),
+        ]);
+        return ['pesan' => 'Pengecekan rujukan BPJS gagal; periksa log Laravel'];
+    }
+}
+
+
 }
