@@ -1,0 +1,69 @@
+name: rsbm-apisimrs
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: php
+    image: rsbm-apisimrs-app:latest
+    container_name: rsbm-apisimrs-app
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    volumes:
+      - ./runtime/storage:/var/www/html/storage
+      - ./runtime/bootstrap-cache:/var/www/html/bootstrap/cache
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "php -m | grep -q pdo_pgsql && php -m | grep -q sqlsrv && php -m | grep -q pdo_sqlsrv"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    image: rsbm-apisimrs-web:latest
+    container_name: rsbm-apisimrs-web
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:19014:80"
+    networks:
+      - internal
+      - rsbm_proxy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  internal:
+    name: rsbm_apisimrs_internal
+    driver: bridge
+
+  rsbm_proxy:
+    external: true
