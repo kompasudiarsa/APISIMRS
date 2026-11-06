@@ -42,7 +42,7 @@ class LaboratoriumController extends Controller
         $nobilling = DB::connection('sqlsrv_lis')
             ->table('reshd as rh')
             ->where('rh.ONO', $noorder)
-            ->select('rh.LNO')
+            ->select('rh.LNO', 'rh.pdf_url')
             ->first();
 
         $groupedData = [];
@@ -143,7 +143,10 @@ class LaboratoriumController extends Controller
                 'noorder' => $noorder,
 
                 'nobilling' => $nobilling
-                    ? trim($nobilling->LNO)
+                    ? [
+                        'lno' => trim($nobilling->LNO),
+                        'pdf_url' => $nobilling->pdf_url,
+                    ]
                     : null,
 
                 'hasil' => array_values($groupedData),
