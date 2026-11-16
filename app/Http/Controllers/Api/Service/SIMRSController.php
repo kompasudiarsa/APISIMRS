@@ -4185,6 +4185,115 @@ class SIMRSController extends Controller
             ->where('tm.statusenabled', true)
             ->count();
     }
+    // Jhon | 2026-11-13 11:19 WITA | TAMBAH: daftar form surat keterangan sesuai query headfk 210337; tidak mengambil surat pasien.
+    // Jhon | 2026-11-13 12:02 WITA | UBAH: gabungkan master PostgreSQL dengan jumlah dokumen MongoDB pasien; collection tidak diambil dari request.
+    public function suratKeterangan(Request $r)
+    {
+        // Jhon | 2026-11-13 13:58 WITA | UBAH: terima ID angka/UUID; validasi API selalu JSON, bukan redirect ke halaman welcome.
+        $validator = \Illuminate\Support\Facades\Validator::make($r->all(), [
+            'nocmfk' => ['required', 'string', 'max:100', 'regex:/^(?:[1-9][0-9]*|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/D'],
+            'statusJadwal' => 'nullable|string|max:100',
+            'emrpasienfk' => 'required_if:detail,1|nullable|string|max:100',
+            // Jhon | 2026-11-13 19:10 WITA | TAMBAH: detail dokumen hanya dari collection yang terdaftar pada master.
+            'collection' => ['required_if:detail,1','nullable','string','regex:/^[A-Za-z][A-Za-z0-9_]*$/D','max:100'],
+            'detail' => 'nullable|in:0,1',
+            // Jhon | 2026-11-13 20:13 WITA | TAMBAH: PDF hanya menerima pasangan jenis dan ID dokumen yang tervalidasi.
+            'format' => 'nullable|in:json,pdf',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Parameter surat keterangan tidak sesuai.', 'errors' => $validator->errors()], 422);
+        }
+        $validated = $validator->validated();
+        // Jhon | 2026-11-13 20:13 WITA | TAMBAH: mode PDF wajib detail agar tidak mencetak master atau surat tanpa ID.
+        if (($validated['format']??'json')==='pdf' && (string)($validated['detail']??'0')!=='1') {
+            return response()->json(['message'=>'PDF memerlukan detail=1, collection dan emrpasienfk.'],422);
+        }
+        // Jhon | 2026-11-13 12:02 WITA | TAMBAH: profil RS tetap 1 mengikuti instalasi ini, bukan parameter dari browser.
+        $kdProfile = 1;
+        // Jhon | 2026-11-13 13:58 WITA | UBAH: UUID tidak dikonversi menjadi 0; tambahkan varian integer hanya bila aman dan nilainya identik.
+        $nocmfk = $validated['nocmfk'];
+        $patientIds = [$nocmfk];
+        if (ctype_digit($nocmfk) && (string)(int)$nocmfk === $nocmfk) {
+            $patientIds[] = (int)$nocmfk;
+        }
+        $master = DB::connection('pgsql')->table('emr_t as emr')
+            ->where('emr.headfk', 210337)
+            ->where('emr.kdprofile', $kdProfile)
+            ->where('emr.statusenabled', true)
+            ->orderBy('emr.nourut')
+            ->select('emr.*', 'emr.url_form as url')
+            ->get();
+        // Jhon | 2026-11-13 19:10 WITA | TAMBAH: batasi jenis surat pada master aktif, bukan table arbitrary dari URL.
+        if (!empty($validated['collection'])) {
+            $master = $master->filter(function ($row) use ($validated) { return $row->collection === $validated['collection']; });
+        }
+        $detail = ($validated['detail'] ?? '0') === '1';
+        $data = [];
+        try {
+            // Jhon | 2026-11-13 12:02 WITA | TAMBAH: satu hitungan per collection; tipe angka/string menunjuk identitas pasien yang sama.
+            $counts = [];
+            $documentIds = [];
+            foreach ($master as $row) {
+                $collection = trim((string) ($row->collection ?? ''));
+                if (!preg_match('/^[A-Za-z][A-Za-z0-9_]*$/D', $collection)) {
+                    return response()->json(['message' => 'Collection master surat belum sesuai.'], 503);
+                }
+                if (!array_key_exists($collection, $counts)) {
+                    $query = DB::connection('mongodb')->table($collection)
+                        // Jhon | 2026-11-13 13:58 WITA | UBAH: cari identitas asli, bukan hasil cast UUID ke integer.
+                        ->whereIn('pasien.nocmfk', $patientIds)
+                        ->whereIn('profile.kdprofile', [$kdProfile, (string) $kdProfile])
+                        ->where('statusenabled', true)
+                        ->whereNull('namatemplate');
+                    foreach (['statusJadwal', 'emrpasienfk'] as $filter) {
+                        if (isset($validated[$filter]) && $validated[$filter] !== '') {
+                            $query->where($filter, $validated[$filter]);
+                        }
+                    }
+                    // Jhon | 2026-11-13 19:10 WITA | TAMBAH: listing hanya ID dokumen; detail penuh hanya dengan filter pemilik dan emrpasienfk.
+                    if ($detail) {
+                        $document = $query->first();
+                        if (!$document) return response()->json(['message'=>'Surat tidak ditemukan.'],404);
+                        // Jhon | 2026-11-13 19:42 WITA | TAMBAH: legalitas dokter mengikuti master pegawai backend; tidak membangkitkan QR/tanda tangan baru.
+                        $document = json_decode(json_encode($document), true);
+                        $document = app(\App\Services\SuratKeteranganDoctorService::class)->enrich($document, $kdProfile);
+                        // Jhon | 2026-11-13 20:13 WITA | TAMBAH: adaptasi jalur cetakEMR backend; pemilik sudah difilter sebelum render PDF/QR.
+                        if (($validated['format']??'json')==='pdf') {
+                            return app(\App\Services\SuratKeteranganPdfService::class)->render($collection,$document);
+                        }
+                        return response()->json(['data'=>[['collection'=>$collection,'caption'=>$row->caption,'document'=>$document]]]);
+                    }
+                    // Jhon | 2026-11-16 12:30 WITA | UBAH: Daftar hanya surat dibuat selama tujuh hari terakhir; detail/PDF tetap memakai pemeriksaan pemilik semula.
+                    // created_at backend disimpan sebagai string Y-m-d H:i:s, bukan updated_at atau tanggal registrasi.
+                    $listingNow = \Carbon\Carbon::now('Asia/Makassar');
+                    $query->whereBetween('created_at', [
+                        $listingNow->copy()->subDays(7)->format('Y-m-d H:i:s'),
+                        $listingNow->format('Y-m-d H:i:s'),
+                    ]);
+                    $documents = $query->get(['emrpasienfk']);
+                    $counts[$collection] = $documents->count();
+                    $documentIds[$collection] = $documents->map(function ($doc) {
+                        $id = data_get($doc,'emrpasienfk');
+                        return is_scalar($id) && trim((string)$id) !== '' ? (string)$id : null;
+                    })->filter()->unique()->values()->all();
+                }
+                if ($counts[$collection] > 0) {
+                    // Jhon | 2026-11-13 19:10 WITA | TAMBAH: sertakan ID dokumen tanpa isi medis untuk link halaman laporan.
+                    $row->documents = array_map(function ($id) use ($collection) {
+                        return ['collection'=>$collection,'emrpasienfk'=>$id];
+                    }, $documentIds[$collection]);
+                    $row->jumlah_surat = $counts[$collection];
+                    $data[] = $row;
+                }
+            }
+        } catch (\Throwable $exception) {
+            // Jhon | 2026-11-13 12:02 WITA | TAMBAH: gagal MongoDB bukan daftar kosong; jangan bocorkan dokumen, koneksi, atau exception.
+            return response()->json(['message' => 'Data surat atau layanan pendukung PDF SIMRS belum dapat dimuat.'], 503);
+        }
+        if ($detail) return response()->json(['message'=>'Jenis surat tidak ditemukan.'],404);
+        return response()->json(['data' => $data]);
+    }
+
     public function masterEduBoard(Request $r)
     {
         $data  = DB::connection('pgsql')->table('eduboard_m');

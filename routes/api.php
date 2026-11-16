@@ -24,6 +24,9 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 Route::prefix('service')
     ->middleware('api.signature')
     ->group(function () {
+        // Jhon | 2026-11-13 11:19 WITA | TAMBAH: endpoint surat mewarisi api.signature.
+        Route::get('/surat-keterangan', [SIMRSController::class, 'suratKeterangan']);
+
         Route::get(
             '/gethasilradiologi',
             [RadiologiController::class, 'GetHasil']
