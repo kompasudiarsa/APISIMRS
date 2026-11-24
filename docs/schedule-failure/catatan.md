@@ -1,0 +1,6 @@
+# Jadwal tidak tampil: pembacaan API gagal
+20 November 2026 WITA. Log API yang tersedia mencatat kiosk_reservation_check_failed pada03:44:09,03:44:13,04:04:29,04:05:00UTC, tetapi hanya category upstream_read tanpa detail. Tidak cukup untuk menetapkan kolom/query yang salah. Probe pasien tidak ada200 tidak mencapai cabangreservasi/jadwal, sehingga tidak menjadi bukti jadwal live berhasil.
+
+Tambahkan tahap START/PATIENT_EXISTS/RESERVATIONS/VISITS/EXPIRED_BOOKINGS/HOLIDAYS/PAYER_MASTER/SCHEDULE_MASTER/SCHEDULE_PARSE/QUOTA_COUNTS pada service; catchcontroller mencatat read_stage,error_type,sqlstate dan diagnostic_referenceUUID. Tidak mencatat SQL/bindings/exceptionmessage/identitas/secret. Respons publik tetap503+referensi, bukan jadwal kosong. Tidak mengubah query/kebijakan atau membuat transaksi.
+
+Backup backups/kiosk-schedule-failure; source controller/service/test existing untracked dipertahankan dan dicadangkan. Tes menggunakan SQLitefixture; runtime awal tidak memuatdriver, diperbaiki dengan ekstensi CLI eksplisit tanpa mengubahservice. DropColumnfixture sempat memerlukanDBAL, diganti SQLALTER padaSQLitefixture saja. Hasil akhir retest.txt. Tahaplanjut: ulangi satu kali lookup->pilihpenjamin pada runtime aktual setelah sourceAPIterbaru termuat; baca metadata kejadian baru untuk perbaikan spesifik. Status masalah operasional masih belum selesai.

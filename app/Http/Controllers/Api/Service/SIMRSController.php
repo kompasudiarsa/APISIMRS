@@ -13,6 +13,85 @@ class SIMRSController extends Controller
 {
     //
 
+    // Jhon | 2026-11-18 11:49 WITA | TAMBAH: Riwayat registrasi berdasarkan RM tepat, profil tetap instalasi dan autentikasi signature route.
+    public function riwayatRegistrasi(Request $r)
+    {
+        $input=$r->all();
+        if (empty($input['nocm']) && !empty($input['norm'])) $input['nocm']=$input['norm'];
+        $validator=\Illuminate\Support\Facades\Validator::make($input,[
+            'nocm'=>['required','string','max:30','regex:/^[A-Za-z0-9.\-]+$/D'],
+            'id'=>'nullable|string|max:100','namaPasien'=>'nullable|string|max:150',
+            'noReg'=>'nullable|string|max:100','idRuangan'=>'nullable|integer|min:1',
+            'page'=>'nullable|integer|min:1|max:10000','per_page'=>'nullable|integer|min:1|max:100',
+        ]);
+        if($validator->fails()) return response()->json(['message'=>'Parameter riwayat registrasi tidak sesuai.','errors'=>$validator->errors()],422);
+        $v=$validator->validated();$kdProfile=1;
+        $query=DB::connection('pgsql')->table('pasien_m as ps')
+            ->join('pasiendaftar_t as pd','pd.nocmfk','=','ps.id')
+            ->join('ruangan_m as ru','ru.id','=','pd.objectruanganlastfk')
+            ->join('kelompokpasien_m as kp','kp.id','=','pd.objectkelompokpasienlastfk')
+            ->join('profile_m as pro','pro.id','=','pd.kdprofile')
+            ->leftJoin('pegawai_m as pg','pg.id','=','pd.objectpegawaifk')
+            ->where('pd.statusenabled',true)->where('ps.statusenabled',true)
+            ->where('ps.kdprofile',$kdProfile)->where('pd.kdprofile',$kdProfile)
+            ->where('ps.nocm',$v['nocm'])
+            ->select(['pd.norec','pd.tglregistrasi','ps.nocm','pd.noregistrasi','ps.namapasien',
+                'pd.objectruanganlastfk','kp.kelompokpasien','ru.namaruangan','pd.objectpegawaifk',
+                'pg.namalengkap as namadokter','pd.tglkecelakaan','pd.tglpulang','ru.objectdepartemenfk',
+                'pro.namalengkap as namaprofile','ru.nocounter']);
+        foreach(['id'=>'ps.id','noReg'=>'pd.noregistrasi','idRuangan'=>'pd.objectruanganlastfk'] as $key=>$column){
+            if(isset($v[$key]) && $v[$key]!=='') $query->where($column,$v[$key]);
+        }
+        if(!empty($v['namaPasien'])) $query->where('ps.namapasien','ilike','%'.$v['namaPasien'].'%');
+        $result=$query->orderByDesc('pd.tglregistrasi')->orderByDesc('pd.norec')
+            ->paginate((int)($v['per_page']??50),['*'],'page',(int)($v['page']??1));
+        // Jhon | 2026-11-18 11:49 WITA | TAMBAH: Durasi lokal tanpa getAge/respond yang tidak tersedia; tanggal kosong tetap kosong.
+        $now=Carbon::now('Asia/Makassar');
+        foreach($result->items() as $row){
+            $row->lamarawat=null;
+            try {
+                if(!empty($row->tglregistrasi)){
+                    $start=Carbon::parse($row->tglregistrasi,'Asia/Makassar');
+                    $end=!empty($row->tglpulang)?Carbon::parse($row->tglpulang,'Asia/Makassar'):$now;
+                    if($end->greaterThanOrEqualTo($start)){
+                        $minutes=(int)$start->diffInMinutes($end);
+                        $row->lamarawat=intdiv($minutes,1440).' hari '.intdiv($minutes%1440,60).' jam '.($minutes%60).' menit';
+                    }
+                }
+            }catch(\Throwable $e){$row->lamarawat=null;}
+        }
+        return response()->json(['data'=>$result->items(),'meta'=>[
+            'current_page'=>$result->currentPage(),'per_page'=>$result->perPage(),
+            'total'=>$result->total(),'last_page'=>$result->lastPage(),
+        ]])->header('Cache-Control','private, no-store, max-age=0');
+    }
+
+    // Jhon | 2026-11-18 12:05 WITA | TAMBAH: Cari pasien aktif menurut No. CM tepat; tanpa enumerasi daftar pasien atau join alamat berulang.
+    public function pasienLama(Request $r)
+    {
+        $validator=\Illuminate\Support\Facades\Validator::make($r->all(),[
+            'nocm'=>['required','string','max:30','regex:/^[A-Za-z0-9.\-]+$/D'],
+            'id'=>'nullable|string|max:100',
+            'tgllahir'=>'nullable|date_format:Y-m-d',
+        ]);
+        if($validator->fails()) return response()->json(['message'=>'No. CM wajib diisi dan parameter harus sesuai.','errors'=>$validator->errors()],422);
+        $v=$validator->validated();
+        $query=DB::connection('pgsql')->table('pasien_m as ps')
+            ->leftJoin('jeniskelamin_m as jk','jk.id','=','ps.objectjeniskelaminfk')
+            ->leftJoin('kebangsaan_m as kbg','kbg.id','=','ps.objectkebangsaanfk')
+            ->where('ps.statusenabled',true)->where('ps.kdprofile',1)->where('ps.nocm',$v['nocm'])
+            ->select(['ps.id','ps.namapasien','ps.nocm','ps.noidentitas','ps.nohp','ps.statusemr','ps.nobpjs',
+                'jk.jeniskelamin','ps.alamatlengkap','ps.tempatlahir','ps.tgllahir','ps.tglmeninggal',
+                'ps.ihs_number','ps.namaibu','ps.progress','ps.isfoto','ps.filename','ps.isbayi',
+                'ps.objectkebangsaanfk','kbg.name as kebangsaan']);
+        if(!empty($v['id'])) $query->where('ps.id',$v['id']);
+        if(!empty($v['tgllahir'])) $query->whereDate('ps.tgllahir',$v['tgllahir']);
+        // Jhon | 2026-11-18 12:05 WITA | TAMBAH: Nomor RM semestinya unik per profil; jangan memilih pasien pertama bila data duplikat.
+        $data=$query->limit(2)->get();
+        if($data->count()>1)return response()->json(['message'=>'Nomor CM tidak unik. Hubungi pengelola data SIMRS.'],409)->header('Cache-Control','private, no-store, max-age=0');
+        return response()->json(['data'=>$data])->header('Cache-Control','private, no-store, max-age=0');
+    }
+
     public function GetData(Request $request)
     {
         $data = DB::connection('pgsql')

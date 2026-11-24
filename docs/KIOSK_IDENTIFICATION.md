@@ -1,0 +1,10 @@
+<!-- Jhon | 2026-11-19 13:50 WITA | TAMBAH: kontrak read-only Kios-K, signature existing tidak diubah. -->
+# Kiosk identification
+
+POST `/api/service/kiosk/identify`, grup `service` + middleware `api.signature` existing + throttle 60/min. JSON body: `identifier` string 3–64 karakter ASCII alfanumerik/titik/dash, `nonce` 32 hex lowercase acak setiap request. Identifier tidak menjadi URL/query. Signature memakai METHOD + newline + URI + newline + UNIX timestamp + newline + SHA256 body persis; HMAC-SHA256 dengan secret API existing. Token/secret hanya di konfigurasi server.
+
+Respons 200 `{data:{status,patient,nonce}}`. Status: PATIENT_FOUND, PATIENT_NOT_FOUND, MULTIPLE_MATCHES, VERIFICATION_REQUIRED. Patient nonnull hanya PATIENT_FOUND, field id/rm/name/source minimum untuk server Kios-K; jangan publikasikan respons mentah pada browser/log. Nonce wajib cocok. 422 input invalid; 413 body >4096 bytes; 401 auth tidak sah; 409 replay; 503 query gagal. Header no-store pada respons controller. HTTP gagal tidak boleh ditafsirkan sebagai data kosong.
+
+Dua SELECT exact pada pgsql: pasien aktif kdprofile1 berdasarkan nocm/nobpjs/noidentitas, dan booking noreservasi kdprofile1 dengan pasien aktif profil1. Deduplikasi id, jangan memilih salah satu ketika ganda. Booking dibatalkan masih dapat menunjukkan identitas pasien; endpoint ini **tidak membuktikan booking valid** dan tidak membuat antrean/pendaftaran. Booking belum terhubung pasien aktif => VERIFICATION_REQUIRED. Kegagalan salah satu query =>503.
+
+Adapter Kios-K opt-in SIMRS_DRIVER=api_simrs. SIMRS_BASE_URL origin saja, misalnya http://127.0.0.1:8000; SIMRS_TOKEN/SIMRS_SECRET memakai API_CLIENT_TOKEN/API_CLIENT_SECRET existing, diisi lokal tanpa dibagikan. SIMRS_ALLOW_HTTP khusus testing lokal; SIMRS_CONTRACT_CONFIRMED hanya setelah endpoint terpasang dan kontrak dikonfirmasi. Panduan lengkap overlay dua proyek: Kios-K/docs/integrasi-api-simrs-8000.md. Middleware signature dan kredensial API existing tidak diubah. Lookup publik Kios-K tetap memakai grant; cek tanpa grant hanya melalui guard petugas yang sah.

@@ -1,0 +1,314 @@
+PHPUnit 9.6.35 by Sebastian Bergmann and contributors.
+
+EEEEEEEE                                                            8 / 8 (100%)
+
+Time: 00:02.831, Memory: 22.00 MB
+
+There were 8 errors:
+
+1) Tests\Feature\KioskReservationFactsTest::test_lookup_is_exact_patient_date_and_profile_and_includes_cancellation
+Illuminate\Database\QueryException: could not find driver (SQL: PRAGMA foreign_keys = OFF;)
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:712
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+Caused by
+PDOException: could not find driver
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:45
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/SQLiteConnector.php:25
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:222
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:1064
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:495
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:705
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+2) Tests\Feature\KioskReservationFactsTest::test_checked_in_reservation_and_direct_visit_are_returned
+Illuminate\Database\QueryException: could not find driver (SQL: PRAGMA foreign_keys = OFF;)
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:712
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+Caused by
+PDOException: could not find driver
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:45
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/SQLiteConnector.php:25
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:222
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:1064
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:495
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:705
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+3) Tests\Feature\KioskReservationFactsTest::test_missing_patient_is_successful_absence_not_error
+Illuminate\Database\QueryException: could not find driver (SQL: PRAGMA foreign_keys = OFF;)
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:712
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+Caused by
+PDOException: could not find driver
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:45
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/SQLiteConnector.php:25
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:222
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:1064
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:495
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:705
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+4) Tests\Feature\KioskReservationFactsTest::test_schedule_quota_closed_and_holiday_rules
+Illuminate\Database\QueryException: could not find driver (SQL: PRAGMA foreign_keys = OFF;)
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:712
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+Caused by
+PDOException: could not find driver
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:45
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/SQLiteConnector.php:25
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:222
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:1064
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:495
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:705
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+5) Tests\Feature\KioskReservationFactsTest::test_checkin_and_cancellation_conflict_is_not_processable
+Illuminate\Database\QueryException: could not find driver (SQL: PRAGMA foreign_keys = OFF;)
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:712
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+Caused by
+PDOException: could not find driver
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:45
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/SQLiteConnector.php:25
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:222
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:1064
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:495
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:705
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+6) Tests\Feature\KioskReservationFactsTest::test_expired_metadata_is_scoped_and_active_code_is_in_facts
+Illuminate\Database\QueryException: could not find driver (SQL: PRAGMA foreign_keys = OFF;)
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:712
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+Caused by
+PDOException: could not find driver
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:45
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/SQLiteConnector.php:25
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:222
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:1064
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:495
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:705
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+7) Tests\Feature\KioskReservationFactsTest::test_reservation_endpoint_requires_signature_and_returns_existing_contract
+Illuminate\Database\QueryException: could not find driver (SQL: PRAGMA foreign_keys = OFF;)
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:712
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+Caused by
+PDOException: could not find driver
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:45
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/SQLiteConnector.php:25
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:222
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:1064
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:495
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:705
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+8) Tests\Feature\KioskReservationFactsTest::test_missing_column_has_safe_diagnostic_stage
+Illuminate\Database\QueryException: could not find driver (SQL: PRAGMA foreign_keys = OFF;)
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:712
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+Caused by
+PDOException: could not find driver
+
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:70
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:45
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/SQLiteConnector.php:25
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:222
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:1064
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:495
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:705
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:672
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connection.php:490
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Schema/Builder.php:351
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/SQLiteConnection.php:38
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:282
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:75
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php:50
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:140
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php:95
+/mnt/www/API-SIMRS/vendor/laravel/framework/src/Illuminate/Support/Facades/Schema.php:39
+/mnt/www/API-SIMRS/tests/Feature/KioskReservationFactsTest.php:12
+
+ERRORS!
+Tests: 8, Assertions: 0, Errors: 8.
