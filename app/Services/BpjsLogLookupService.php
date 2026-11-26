@@ -15,7 +15,8 @@ class BpjsLogLookupService
         // Jhon | 2026-11-24 13:55 WITA | TAMBAH: Regex pasangan JSON exact, toleran spasi/case seperti ILIKE; tidak cast JSON karena log lama bisa malformed.
         $pattern = '"'.$key.'"[[:space:]]*:[[:space:]]*"'.preg_quote($value, '~').'"';
         $q = DB::connection('pgsql')->table('log_bpjs_t')
-            ->select(['url', 'method', 'data', 'response'])
+            // Jhon | 2026-11-27 07:31 WITA | UBAH: user adalah nama pegawai yang disimpan penulis log SIMRS, bukan akun monitoring.
+            ->select(['url', 'method', 'data', 'response', 'user'])
             ->where('url', self::URLS[$kind])->where('method', 'POST')
             ->whereRaw('CAST("data" AS TEXT) ~* ?', [$pattern]);
         if ($kind === 'surat-kontrol') {
