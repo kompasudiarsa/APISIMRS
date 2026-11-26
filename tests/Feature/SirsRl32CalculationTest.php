@@ -51,4 +51,15 @@ class SirsRl32CalculationTest extends TestCase
         $this->assertNull($method->invoke($service, 'RAWAT INAP UMUM', ['ICCU/ICVCU','RICU']));
         $this->assertNull($method->invoke($service, 'ICCU / RICU', ['ICCU/ICVCU','RICU']));
     }
+    // Jhon | 2026-11-26 22:05 WITA | TAMBAH: tujuh saldo layanan dari lampiran Oktober 2026.
+    public function test_october_reference_closing_balances()
+    {
+        $method = new \ReflectionMethod(SirsRl32V1Service::class, 'calculateClosingBalance');
+        $method->setAccessible(true);
+        $keys = ['pasienawalbulan','pasienmasuk','pasienpindahan','pasiendipindahkan','pasienkeluarhidup','matikurang48jaml','matilebih48jaml','matikurang48jamp','matilebih48jamp'];
+        foreach ([[44,1077,772,217,823,3,9,1,6,834],[2,29,29,19,11,2,2,1,2,23],[1,46,46,30,26,0,1,0,1,35],[0,20,19,0,17,1,0,0,0,21],[2,4,2,2,3,0,0,0,1,2],[0,32,28,11,19,0,2,0,0,28],[0,34,0,0,34,0,0,0,0,0]] as $fixture) {
+            $expected = array_pop($fixture);
+            $this->assertSame($expected, $method->invoke(new SirsRl32V1Service, array_combine($keys, $fixture)));
+        }
+    }
 }

@@ -125,7 +125,8 @@ class SirsRl32V1Service
             ->where('map.kdprofile', $this->kdProfile)
             ->where('map.objectjenislaporanfk',$kind)->where('map.statusenabled',true)
             ->where('kl.statusenabled',true)->select('map.ruanganfk','kl.kelompoklaporan')->distinct()->get()->groupBy('ruanganfk');
-        $special = ['ICU','HCU','ICCU/ICVCU','RICU','NICU','PICU','ISOLASI'];
+        // Jhon | 2026-11-26 21:51 WITA | UBAH: pertahankan mapping Perinatologi sebagai baris tersendiri, bukan dialihkan ke Umum.
+        $special = ['ICU','HCU','ICCU/ICVCU','RICU','NICU','PICU','ISOLASI','PERINATOLOGI'];
         return $rows->unique('episode_id')->map(function ($item) use ($mapping,$special) {
             $labels = collect($mapping->get($item->idRuangan, []))->pluck('kelompoklaporan')->filter(function ($name) use ($special) {
                 return in_array(strtoupper(trim($name)), $special, true);
@@ -140,7 +141,8 @@ class SirsRl32V1Service
             }
             if ($labels->count() > 1) throw new \App\Exceptions\RlMappingConflictException(
                 (int) $item->idRuangan, (string) $item->namaruangan, $labels->all());
-            if (!$labels->count() && preg_match('/\b(ICU|HCU|ICCU|ICVCU|RICU|NICU|PICU|ISOLASI)\b/i', (string) $item->namaruangan)) $this->unmappedSpecialRooms[$item->idRuangan] = true;
+            // Jhon | 2026-11-26 21:51 WITA | UBAH: tandai pula ruangan Perinatologi bila mapping aktif belum tersedia.
+            if (!$labels->count() && preg_match('/\b(ICU|HCU|ICCU|ICVCU|RICU|NICU|PICU|ISOLASI|PERINATOLOGI)\b/i', (string) $item->namaruangan)) $this->unmappedSpecialRooms[$item->idRuangan] = true;
             $item->jenis_spesialisasi = $labels->first() ?? 'Umum';
             return $item;
         })->values();
@@ -170,6 +172,9 @@ class SirsRl32V1Service
             $this->accumulateKelas($grouped[$key], $item);
         }
 
+        // Jhon | 2026-11-26 22:05 WITA | UBAH: saldo akhir mengikuti seluruh baris acuan Oktober, bukan tanggal pasien mendaftar.
+        foreach ($grouped as &$row) $row['pasienakhirbulan'] = $this->calculateClosingBalance($row);
+        unset($row);
         return $grouped;
     }
 
@@ -265,10 +270,7 @@ class SirsRl32V1Service
             $row['pasienawalbulan']++;
         }
 
-        // Pasien akhir bulan
-        if ($hari === $lastDay) {
-            $row['pasienakhirbulan']++;
-        }
+        // Jhon | 2026-11-26 22:05 WITA | UBAH: saldo akhir dihitung sesudah seluruh mutasi layanan dijumlahkan.
 
         // Pasien masuk (dari IGD / dept 16)
         if ($deptNow === 16) {
@@ -331,6 +333,15 @@ class SirsRl32V1Service
             ->where('tm.statusenabled', true)
             ->count();
     }
+    // Jhon | 2026-11-26 22:05 WITA | TAMBAH: jangan clamp saldo negatif karena itu menunjukkan ketidaksesuaian komponen sensus.
+    private function calculateClosingBalance(array $row): int
+    {
+        return (int) $row['pasienawalbulan'] + (int) $row['pasienmasuk'] + (int) $row['pasienpindahan']
+            - (int) $row['pasiendipindahkan'] - (int) $row['pasienkeluarhidup']
+            - (int) $row['matikurang48jaml'] - (int) $row['matilebih48jaml']
+            - (int) $row['matikurang48jamp'] - (int) $row['matilebih48jamp'];
+    }
+
     // Jhon | 2026-11-26 13:02 WITA | TAMBAH: pencocokan token penuh mencegah ICU cocok dengan ICCU/PICU/NICU atau RICU.
     private function resolveServiceFromRoomName(string $room, array $labels): ?string
     {

@@ -192,11 +192,14 @@ class SirsRlReportService
 
     // Jhon | 2026-11-25 19:41 WITA | TAMBAH: getDataRL3_2; pertahankan struktur hasil sumber.
     
+
+
+
 private function getDataRL3_2(Request $request)
 {
     /*
     |--------------------------------------------------------------------------
-    | 1. Validasi parameter laporan
+    | 1. Validasi parameter
     |--------------------------------------------------------------------------
     */
 
@@ -253,17 +256,13 @@ private function getDataRL3_2(Request $request)
 
     $sekarang = Carbon::now('Asia/Makassar');
 
-    if ($awalBulan->gt($sekarang)) {
+    if ($awalBulan->gte($sekarang)) {
         return $this->respond([
             'data' => [],
             'message' => 'Periode laporan belum berjalan.'
         ]);
     }
 
-    /*
-     * Jika laporan bulan berjalan,
-     * gunakan waktu saat ini sebagai batas laporan.
-     */
     $batasLaporan = $akhirBulan->gt($sekarang)
         ? $sekarang->copy()
         : $akhirBulan->copy();
@@ -273,1533 +272,2006 @@ private function getDataRL3_2(Request $request)
         array_fill(0, count($idjenislaporan), '?')
     );
 
-    /*
-    |--------------------------------------------------------------------------
-    | 3. Query utama RL 3.2
-    |--------------------------------------------------------------------------
-    */
+    $db = DB::connection('pgsql');
 
-    $sql = "
+    $startTime = microtime(true);
 
-        WITH periode AS (
-            SELECT
-                CAST(? AS TIMESTAMP) AS awal_bulan,
-                CAST(? AS TIMESTAMP) AS akhir_bulan
-        ),
+    $tahap = 'mapping_perinatologi';
 
-        /* ==================================================
-           PEMETAAN KELOMPOK LAPORAN
-        ================================================== */
+    try {
 
-        mapping_raw AS (
-            SELECT DISTINCT
-                klrl.norecpd,
-                klrl.idruangan,
-                klrl.idkonten
+        /*
+        |--------------------------------------------------------------------------
+        | 3. Identifikasi ruangan dan kelompok Perinatologi
+        |--------------------------------------------------------------------------
+        */
 
-            FROM kelompoklaporanrl_t klrl
+        // ID eksplisit lebih aman daripada pencarian nama.
+        $idsKonfigurasi = array_values(array_unique(array_filter(array_map(
+            'intval', (array) config('rl32.perinatologi_room_ids', [])
+        ), function ($id) { return $id > 0; })));
 
-            WHERE klrl.statusenabled = TRUE
+        $ruanganKandidat = $db->table('ruangan_m')
+            ->where(function ($q) use ($idsKonfigurasi) {
+                if ($idsKonfigurasi) {
+                    $q->whereIn('id', $idsKonfigurasi);
+                } else {
+                    $q->whereRaw("regexp_replace(lower(namaruangan), '[^a-z0-9]', '', 'g') LIKE ?", ['%perinat%']);
+                }
+            })->orderBy('id')->get();
 
-                AND klrl.idjenislaporan IN ($placeholders)
+        // Ruangan nonaktif tidak otomatis dimasukkan; aktifkan secara eksplisit
+        // hanya bila riwayat kapasitas/pelayanan telah diverifikasi.
+        $ruanganPerinatologi = $idsKonfigurasi
+            ? $ruanganKandidat
+            : $db->table('ruangan_m')->whereIn('id', $ruanganKandidat->pluck('id')->all())
+                ->where('statusenabled', true)->orderBy('id')->get();
 
-                AND klrl.norecpd IS NOT NULL
+        $kelompokPerinatologi = $db
+            ->table('kelompoklaporan_m')
+            ->where('statusenabled', true)
+            ->where(function ($query) {
+                $query
+                    ->whereRaw(
+                        "reportdisplay ILIKE ?",
+                        ['%perinat%']
+                    )
+                    ->orWhereRaw(
+                        "kelompoklaporan ILIKE ?",
+                        ['%perinat%']
+                    );
+            })
+            ->orderBy('id')
+            ->get();
 
-                AND klrl.idruangan IS NOT NULL
+        $idRuanganPerinatologi = $ruanganPerinatologi
+            ->pluck('id')
+            ->map(function ($id) {
+                return (int) $id;
+            })
+            ->all();
 
-                AND klrl.idkonten IS NOT NULL
-        ),
+        $idKontenPerinatologi = null;
+        $perinatologiVirtual = false;
 
-        /* ==================================================
-           MENENTUKAN KANDIDAT PASIEN PERIODE LAPORAN
+        $peringatan = [];
 
-           Pasien bulan sebelumnya tetap diambil apabila
-           belum keluar sebelum awal periode laporan.
-        ================================================== */
+        /*
+         * Gunakan master unik jika tersedia, atau ID virtual untuk laporan lokal.
+         */
 
-        kandidat AS (
-            SELECT DISTINCT
-                pdt.norec AS norecpd
+        $kontenKonfigurasi = (int) config('rl32.perinatologi_content_id', 0);
+        if ($kontenKonfigurasi > 0 && $db->table('kelompoklaporan_m')
+            ->where('id', $kontenKonfigurasi)->exists()) {
+            $idKontenPerinatologi = $kontenKonfigurasi;
+        } elseif ($kelompokPerinatologi->count() === 1) {
+            $idKontenPerinatologi = (int) $kelompokPerinatologi->first()->id;
+        } elseif (!empty($idRuanganPerinatologi)) {
+            // ID khusus laporan lokal, bukan ID master SIRS.
+            $idKontenPerinatologi = -32001;
+            while ($db->table('kelompoklaporan_m')
+                ->where('id', $idKontenPerinatologi)->exists()) {
+                $idKontenPerinatologi--;
+            }
+            $perinatologiVirtual = true;
+            $peringatan[] = 'Perinatologi menggunakan kelompok laporan lokal; '
+                . 'master resmi belum ditemukan secara unik.';
+        }
 
-            FROM pasiendaftar_t pdt
+        if ($kontenKonfigurasi > 0 && $idKontenPerinatologi !== $kontenKonfigurasi) {
+            $peringatan[] = 'ID konten Perinatologi konfigurasi tidak ditemukan; periksa master.';
+        }
+        if (array_diff($idsKonfigurasi, $idRuanganPerinatologi)) {
+            $peringatan[] = 'Sebagian ID ruangan konfigurasi tidak ditemukan.';
+        }
+        if ($ruanganKandidat->count() > $ruanganPerinatologi->count()) {
+            $peringatan[] = 'Ada ruangan Perinatologi nonaktif yang tidak dipilih.';
+        }
+        if (empty($idRuanganPerinatologi)) {
 
-            CROSS JOIN periode pr
+            $peringatan[] =
+                'Ruangan Perinatologi aktif tidak ditemukan.';
+        }
 
-            WHERE pdt.tglregistrasi < pr.akhir_bulan
+        /*
+         * Jika master belum tersedia, query utama tetap
+         * dapat dijalankan tanpa pemetaan tambahan.
+         */
 
-                AND (
+        $ruanganPerinatologiSql = !empty($idRuanganPerinatologi)
+            ? implode(',', $idRuanganPerinatologi)
+            : 'NULL';
+
+        $kontenPerinatologiSql = $idKontenPerinatologi !== null
+            ? (string) $idKontenPerinatologi
+            : 'NULL';
+
+        /*
+        |--------------------------------------------------------------------------
+        | 4. Query utama laporan RL 3.2
+        |--------------------------------------------------------------------------
+        */
+
+        // Audit agregat, tanpa nama/nomor rekam medis.
+        $tahap = 'audit_perinatologi';
+        $idsAudit = array_map('intval', $ruanganKandidat->pluck('id')->all());
+        $idsAuditSql = $idsAudit ? implode(',', $idsAudit) : 'NULL';
+        $auditSql = "WITH pr AS (
+            SELECT CAST(? AS timestamp) AS awal, CAST(? AS timestamp) AS akhir
+        ), dasar AS (
+            SELECT a.noregistrasifk, a.objectruanganfk, a.tglmasuk, a.tglkeluar,
+                   p.norec AS pd, p.tglregistrasi,
+                   COALESCE(p.tglmeninggal, p.tglpulang) AS keluar_rs,
+                   pr.awal, pr.akhir
+            FROM antrianpasiendiperiksa_t a
+            LEFT JOIN pasiendaftar_t p ON p.norec = a.noregistrasifk
+            CROSS JOIN pr
+            WHERE a.objectruanganfk IN ($idsAuditSql)
+              AND ((a.tglmasuk < pr.akhir AND
+                    (a.tglkeluar >= pr.awal OR a.tglkeluar IS NULL
+                     OR a.tglmasuk >= pr.awal))
+                OR (a.tglmasuk IS NULL AND p.tglregistrasi >= pr.awal
+                    AND p.tglregistrasi < pr.akhir))
+        ), audit AS (
+            SELECT *, CASE
+              WHEN objectruanganfk NOT IN ($ruanganPerinatologiSql) OR $kontenPerinatologiSql IS NULL
+                THEN 'MAPPING_RUANGAN_TIDAK_AKTIF'
+              WHEN noregistrasifk IS NULL THEN 'FK_REGISTRASI_KOSONG'
+              WHEN pd IS NULL THEN 'REGISTRASI_TIDAK_DITEMUKAN'
+              WHEN tglregistrasi IS NULL THEN 'TGL_REGISTRASI_KOSONG'
+              WHEN tglmasuk IS NULL THEN 'TGL_MASUK_KOSONG'
+              WHEN tglregistrasi >= akhir THEN 'REGISTRASI_DI_LUAR_PERIODE'
+              WHEN keluar_rs < awal THEN 'KELUAR_SEBELUM_PERIODE'
+              WHEN tglkeluar < tglmasuk THEN 'KRONOLOGI_APD_TIDAK_VALID'
+              WHEN keluar_rs < tglmasuk THEN 'PULANG_SEBELUM_MASUK'
+              ELSE 'LOLOS_FILTER_DASAR' END AS alasan
+            FROM dasar
+        ) SELECT alasan, COUNT(*) AS jumlah_transaksi,
+            COUNT(DISTINCT noregistrasifk) AS jumlah_registrasi
+            FROM audit GROUP BY alasan ORDER BY alasan";
+        // NULL NOT IN (NULL) tidak bernilai TRUE; tangani kondisi daftar kosong.
+        if (!$idRuanganPerinatologi) {
+            $auditSql = str_replace('objectruanganfk NOT IN (NULL)', 'TRUE', $auditSql);
+        }
+        $auditDasar = $idsAudit ? $db->select($auditSql, [
+            $awalBulan->format('Y-m-d H:i:s'),
+            $batasLaporan->format('Y-m-d H:i:s')
+        ]) : [];
+        $auditDasar = array_map(function ($row) {
+            return ['alasan' => $row->alasan,
+                'jumlah_transaksi' => (int) $row->jumlah_transaksi,
+                'jumlah_registrasi' => (int) $row->jumlah_registrasi];
+        }, $auditDasar);
+
+        $tahap = 'query_rl32';
+
+        $sql = "
+
+            WITH periode AS (
+                SELECT
+                    CAST(? AS TIMESTAMP) AS awal_bulan,
+                    CAST(? AS TIMESTAMP) AS akhir_bulan
+            ),
+
+            /* ==============================================
+               KANDIDAT PASIEN BERDASARKAN PERIODE
+
+               Filter pasien terlebih dahulu agar query
+               tidak mengambil seluruh histori laporan.
+            ============================================== */
+
+            kandidat_periode AS (
+                SELECT
+                    pdt.norec AS norecpd,
+                    pdt.noregistrasi,
+                    pdt.nocmfk,
+                    pdt.tglregistrasi,
+                    pdt.tglpulang,
+                    pdt.tglmeninggal,
+                    pdt.objectstatuskeluarfk,
+                    pdt.objectkelasfk,
+
                     COALESCE(
                         pdt.tglmeninggal,
                         pdt.tglpulang
-                    ) >= pr.awal_bulan
+                    ) AS waktu_keluar_rs
 
-                    OR (
-                        pdt.tglpulang IS NULL
-                        AND pdt.tglmeninggal IS NULL
-                    )
-                )
+                FROM pasiendaftar_t pdt
 
-                AND EXISTS (
-                    SELECT 1
-                    FROM mapping_raw m
-                    WHERE m.norecpd = pdt.norec
-                )
-        ),
+                CROSS JOIN periode pr
 
-        /* ==================================================
-           CEK KONFLIK PEMETAAN
+                WHERE pdt.tglregistrasi < pr.akhir_bulan
 
-           Satu pasien dalam satu ruangan tidak boleh
-           terhitung pada beberapa kelompok sekaligus.
-        ================================================== */
-
-        mapping_konflik AS (
-            SELECT
-                m.norecpd,
-                m.idruangan
-
-            FROM mapping_raw m
-
-            INNER JOIN kandidat kd
-                ON kd.norecpd = m.norecpd
-
-            GROUP BY
-                m.norecpd,
-                m.idruangan
-
-            HAVING COUNT(DISTINCT m.idkonten) > 1
-        ),
-
-        registrasi_konflik AS (
-            SELECT DISTINCT
-                norecpd
-
-            FROM mapping_konflik
-        ),
-
-        mapping AS (
-            SELECT
-                m.norecpd,
-                m.idruangan,
-                m.idkonten
-
-            FROM mapping_raw m
-
-            INNER JOIN kandidat kd
-                ON kd.norecpd = m.norecpd
-
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM registrasi_konflik mk
-                WHERE mk.norecpd = m.norecpd
-            )
-        ),
-
-        /* ==================================================
-           MENGAMBIL RIWAYAT RAWAT INAP
-        ================================================== */
-
-        riwayat_raw AS (
-            SELECT
-                apd.norec AS norec_apd,
-
-                apd.noregistrasifk,
-
-                apd.objectruanganfk,
-
-                apd.tglmasuk,
-
-                apd.tglkeluar,
-
-                m.idkonten,
-
-                pdt.noregistrasi,
-
-                pdt.nocmfk,
-
-                pdt.tglregistrasi,
-
-                pdt.tglpulang,
-
-                pdt.tglmeninggal,
-
-                pdt.objectstatuskeluarfk,
-
-                pdt.objectkelasfk,
-
-                pm.objectjeniskelaminfk,
-
-                COALESCE(
-                    pdt.tglmeninggal,
-                    pdt.tglpulang
-                ) AS waktu_keluar_rs,
-
-                ROW_NUMBER() OVER (
-                    PARTITION BY
-                        apd.noregistrasifk,
-                        apd.objectruanganfk,
-                        apd.tglmasuk
-
-                    ORDER BY
-                        apd.tglkeluar DESC NULLS LAST,
-                        apd.norec
-                ) AS nomor_duplikat
-
-            FROM mapping m
-
-            INNER JOIN antrianpasiendiperiksa_t apd
-                ON apd.noregistrasifk = m.norecpd
-                AND apd.objectruanganfk = m.idruangan
-
-            INNER JOIN pasiendaftar_t pdt
-                ON pdt.norec = apd.noregistrasifk
-
-            LEFT JOIN pasien_m pm
-                ON pm.id = pdt.nocmfk
-
-            WHERE apd.tglmasuk IS NOT NULL
-        ),
-
-        /* ==================================================
-           MENGHILANGKAN DUPLIKAT RIWAYAT APD
-        ================================================== */
-
-        riwayat AS (
-            SELECT *
-            FROM riwayat_raw
-            WHERE nomor_duplikat = 1
-        ),
-
-        /* ==================================================
-           MENYUSUN KRONOLOGI PERAWATAN PASIEN
-        ================================================== */
-
-        kronologi AS (
-            SELECT
-                r.*,
-
-                MIN(r.tglmasuk) OVER (
-                    PARTITION BY r.noregistrasifk
-                ) AS awal_rawat_inap,
-
-                LAG(r.idkonten) OVER (
-                    PARTITION BY r.noregistrasifk
-
-                    ORDER BY
-                        r.tglmasuk,
-                        r.norec_apd
-                ) AS kelompok_sebelumnya,
-
-                LEAD(r.idkonten) OVER (
-                    PARTITION BY r.noregistrasifk
-
-                    ORDER BY
-                        r.tglmasuk,
-                        r.norec_apd
-                ) AS kelompok_selanjutnya,
-
-                LEAD(r.tglmasuk) OVER (
-                    PARTITION BY r.noregistrasifk
-
-                    ORDER BY
-                        r.tglmasuk,
-                        r.norec_apd
-                ) AS waktu_masuk_selanjutnya
-
-            FROM riwayat r
-        ),
-
-        /* ==================================================
-           MENANDAI PERPINDAHAN KELOMPOK PELAYANAN
-        ================================================== */
-
-        penanda_episode AS (
-            SELECT
-                k.*,
-
-                CASE
-                    WHEN k.kelompok_sebelumnya IS NULL
-                        THEN 1
-
-                    WHEN k.kelompok_sebelumnya
-                        IS DISTINCT FROM k.idkonten
-                        THEN 1
-
-                    ELSE 0
-
-                END AS episode_baru
-
-            FROM kronologi k
-        ),
-
-        nomor_episode AS (
-            SELECT
-                p.*,
-
-                SUM(p.episode_baru) OVER (
-                    PARTITION BY p.noregistrasifk
-
-                    ORDER BY
-                        p.tglmasuk,
-                        p.norec_apd
-
-                    ROWS BETWEEN
-                        UNBOUNDED PRECEDING
-                        AND CURRENT ROW
-                ) AS episode_id
-
-            FROM penanda_episode p
-        ),
-
-        /* ==================================================
-           MENGGABUNGKAN RUANGAN DENGAN KELOMPOK SAMA
-        ================================================== */
-
-        episode_dasar AS (
-            SELECT
-                noregistrasifk,
-
-                noregistrasi,
-
-                nocmfk,
-
-                idkonten,
-
-                episode_id,
-
-                MIN(tglmasuk)
-                    AS mulai_episode,
-
-                MAX(awal_rawat_inap)
-                    AS awal_rawat_inap,
-
-                MAX(tglregistrasi)
-                    AS tglregistrasi,
-
-                MAX(tglpulang)
-                    AS tglpulang,
-
-                MAX(tglmeninggal)
-                    AS tglmeninggal,
-
-                MAX(waktu_keluar_rs)
-                    AS waktu_keluar_rs,
-
-                MAX(objectstatuskeluarfk)
-                    AS objectstatuskeluarfk,
-
-                MAX(objectkelasfk)
-                    AS objectkelasfk,
-
-                MAX(objectjeniskelaminfk)
-                    AS objectjeniskelaminfk
-
-            FROM nomor_episode
-
-            GROUP BY
-                noregistrasifk,
-                noregistrasi,
-                nocmfk,
-                idkonten,
-                episode_id
-        ),
-
-        /* ==================================================
-           MENENTUKAN ASAL DAN TUJUAN MUTASI
-        ================================================== */
-
-        episode_kronologi AS (
-            SELECT
-                e.*,
-
-                LAG(e.idkonten) OVER (
-                    PARTITION BY e.noregistrasifk
-                    ORDER BY e.episode_id
-                ) AS asal_kelompok,
-
-                LEAD(e.idkonten) OVER (
-                    PARTITION BY e.noregistrasifk
-                    ORDER BY e.episode_id
-                ) AS tujuan_kelompok,
-
-                LEAD(e.mulai_episode) OVER (
-                    PARTITION BY e.noregistrasifk
-                    ORDER BY e.episode_id
-                ) AS mulai_episode_selanjutnya
-
-            FROM episode_dasar e
-        ),
-
-        /* ==================================================
-           MENENTUKAN TANGGAL AKHIR EPISODE
-        ================================================== */
-
-        episode AS (
-            SELECT
-                e.*,
-
-                LEAST(
-                    e.mulai_episode_selanjutnya,
-                    e.waktu_keluar_rs
-                ) AS akhir_episode
-
-            FROM episode_kronologi e
-        ),
-
-        /* ==================================================
-           MEMBATASI EPISODE PADA PERIODE LAPORAN
-        ================================================== */
-
-        episode_periode AS (
-            SELECT
-                e.*,
-
-                pr.awal_bulan,
-
-                pr.akhir_bulan,
-
-                GREATEST(
-                    e.mulai_episode,
-                    pr.awal_bulan
-                ) AS mulai_hitung,
-
-                LEAST(
-                    COALESCE(
-                        e.akhir_episode,
-                        pr.akhir_bulan
-                    ),
-                    pr.akhir_bulan
-                ) AS akhir_hitung
-
-            FROM episode e
-
-            CROSS JOIN periode pr
-
-            WHERE e.mulai_episode < pr.akhir_bulan
-
-                AND (
-                    e.akhir_episode >= pr.awal_bulan
-                    OR e.akhir_episode IS NULL
-                )
-
-                AND (
-                    e.akhir_episode >= e.mulai_episode
-                    OR e.akhir_episode IS NULL
-                )
-        ),
-
-        /* ==================================================
-           MENGHITUNG INDIKATOR PELAYANAN RAWAT INAP
-        ================================================== */
-
-        indikator AS (
-            SELECT
-                ep.*,
-
-                /* ------------------------------------------
-                   PASIEN AWAL BULAN
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.mulai_episode < ep.awal_bulan
-
-                        AND (
-                            ep.akhir_episode >= ep.awal_bulan
-                            OR ep.akhir_episode IS NULL
-                        )
-
-                    THEN 1
-                    ELSE 0
-
-                END AS pasien_awal_bulan,
-
-                /* ------------------------------------------
-                   PASIEN MASUK BARU
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.asal_kelompok IS NULL
-
-                        AND ep.mulai_episode >= ep.awal_bulan
-
-                        AND ep.mulai_episode < ep.akhir_bulan
-
-                    THEN 1
-                    ELSE 0
-
-                END AS pasien_masuk,
-
-                /* ------------------------------------------
-                   PASIEN PINDAHAN
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.asal_kelompok IS NOT NULL
-
-                        AND ep.mulai_episode >= ep.awal_bulan
-
-                        AND ep.mulai_episode < ep.akhir_bulan
-
-                    THEN 1
-                    ELSE 0
-
-                END AS pasien_pindahan,
-
-                /* ------------------------------------------
-                   PASIEN DIPINDAHKAN
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.tujuan_kelompok IS NOT NULL
-
-                        AND ep.akhir_episode =
-                            ep.mulai_episode_selanjutnya
-
-                        AND ep.akhir_episode >= ep.awal_bulan
-
-                        AND ep.akhir_episode < ep.akhir_bulan
-
-                        AND (
-                            ep.waktu_keluar_rs IS NULL
-                            OR ep.akhir_episode <
-                                ep.waktu_keluar_rs
-                        )
-
-                    THEN 1
-                    ELSE 0
-
-                END AS pasien_dipindahkan,
-
-                /* ------------------------------------------
-                   PASIEN KELUAR HIDUP
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.tujuan_kelompok IS NULL
-
-                        AND ep.tglmeninggal IS NULL
-
-                        AND ep.tglpulang >= ep.awal_bulan
-
-                        AND ep.tglpulang < ep.akhir_bulan
-
-                    THEN 1
-                    ELSE 0
-
-                END AS pasien_keluar_hidup,
-
-                /* ------------------------------------------
-                   PASIEN KELUAR MENINGGAL
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.tujuan_kelompok IS NULL
-
-                        AND ep.tglmeninggal >= ep.awal_bulan
-
-                        AND ep.tglmeninggal < ep.akhir_bulan
-
-                    THEN 1
-                    ELSE 0
-
-                END AS pasien_keluar_mati,
-
-                /* ------------------------------------------
-                   PASIEN AKHIR PERIODE BERDASARKAN EPISODE
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.mulai_episode < ep.akhir_bulan
-
-                        AND (
-                            ep.akhir_episode >= ep.akhir_bulan
-                            OR ep.akhir_episode IS NULL
-                        )
-
-                    THEN 1
-                    ELSE 0
-
-                END AS pasien_akhir_episode,
-
-                /* ------------------------------------------
-                   JUMLAH LAMA DIRAWAT
-
-                   Menghitung seluruh lama rawat pasien
-                   yang keluar rumah sakit pada periode.
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.tujuan_kelompok IS NULL
-
-                        AND ep.waktu_keluar_rs >= ep.awal_bulan
-
-                        AND ep.waktu_keluar_rs < ep.akhir_bulan
-
-                        AND ep.waktu_keluar_rs >= ep.awal_rawat_inap
-
-                    THEN GREATEST(
-                        ep.waktu_keluar_rs::DATE
-                        - ep.awal_rawat_inap::DATE,
-                        1
-                    )
-
-                    ELSE 0
-
-                END AS lama_dirawat,
-
-                /* ------------------------------------------
-                   JUMLAH LAMA EPISODE PELAYANAN
-
-                   Kolom alternatif untuk analisis lama
-                   rawat setiap kelompok pelayanan.
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.akhir_episode >= ep.awal_bulan
-
-                        AND ep.akhir_episode < ep.akhir_bulan
-
-                    THEN GREATEST(
-                        ep.akhir_episode::DATE
-                        - ep.mulai_episode::DATE,
-                        1
-                    )
-
-                    ELSE 0
-
-                END AS lama_episode,
-
-                /* ------------------------------------------
-                   JUMLAH HARI PERAWATAN
-
-                   Hanya menghitung hari pada periode
-                   laporan. Hari berjalan yang belum
-                   selesai tidak dihitung.
-                ------------------------------------------ */
-
-                CASE
-                    WHEN ep.akhir_hitung < ep.mulai_hitung
-                        THEN 0
-
-                    WHEN ep.tujuan_kelompok IS NULL
-
-                        AND ep.waktu_keluar_rs >= ep.awal_bulan
-
-                        AND ep.waktu_keluar_rs < ep.akhir_bulan
-
-                        AND ep.awal_rawat_inap::DATE =
-                            ep.waktu_keluar_rs::DATE
-
-                        AND ep.awal_rawat_inap >= ep.awal_bulan
-
-                    THEN 1
-
-                    ELSE GREATEST(
-                        ep.akhir_hitung::DATE
-                        - ep.mulai_hitung::DATE,
-                        0
-                    )
-
-                END AS hari_perawatan
-
-            FROM episode_periode ep
-        ),
-
-        /* ==================================================
-           REKAPITULASI BERDASARKAN JENIS PELAYANAN
-        ================================================== */
-
-        rekap AS (
-            SELECT
-                idkonten,
-
-                SUM(pasien_awal_bulan)
-                    AS pasien_awal_bulan,
-
-                SUM(pasien_masuk)
-                    AS pasien_masuk,
-
-                SUM(pasien_pindahan)
-                    AS pasien_pindahan,
-
-                SUM(pasien_dipindahkan)
-                    AS pasien_dipindahkan,
-
-                SUM(pasien_keluar_hidup)
-                    AS pasien_keluar_hidup,
-
-                SUM(pasien_keluar_mati)
-                    AS pasien_keluar_mati,
-
-                /* ------------------------------------------
-                   MENINGGAL KURANG 48 JAM LAKI-LAKI
-                ------------------------------------------ */
-
-                COUNT(*) FILTER (
-                    WHERE pasien_keluar_mati = 1
-
-                        AND objectjeniskelaminfk = 1
-
-                        AND tglmeninggal >= awal_rawat_inap
-
-                        AND tglmeninggal - awal_rawat_inap
-                            < INTERVAL '48 hours'
-
-                ) AS pasien_meninggal_kurang_48_jam_laki,
-
-                /* ------------------------------------------
-                   MENINGGAL KURANG 48 JAM PEREMPUAN
-                ------------------------------------------ */
-
-                COUNT(*) FILTER (
-                    WHERE pasien_keluar_mati = 1
-
-                        AND objectjeniskelaminfk = 2
-
-                        AND tglmeninggal >= awal_rawat_inap
-
-                        AND tglmeninggal - awal_rawat_inap
-                            < INTERVAL '48 hours'
-
-                ) AS pasien_meninggal_kurang_48_jam_cewe,
-
-                /* ------------------------------------------
-                   MENINGGAL MINIMAL 48 JAM LAKI-LAKI
-                ------------------------------------------ */
-
-                COUNT(*) FILTER (
-                    WHERE pasien_keluar_mati = 1
-
-                        AND objectjeniskelaminfk = 1
-
-                        AND tglmeninggal - awal_rawat_inap
-                            >= INTERVAL '48 hours'
-
-                ) AS pasien_meninggal_lebih_48_jam_laki,
-
-                /* ------------------------------------------
-                   MENINGGAL MINIMAL 48 JAM PEREMPUAN
-                ------------------------------------------ */
-
-                COUNT(*) FILTER (
-                    WHERE pasien_keluar_mati = 1
-
-                        AND objectjeniskelaminfk = 2
-
-                        AND tglmeninggal - awal_rawat_inap
-                            >= INTERVAL '48 hours'
-
-                ) AS pasien_meninggal_lebih_48_jam_cewe,
-
-                /* ------------------------------------------
-                   JUMLAH LAMA DIRAWAT
-                ------------------------------------------ */
-
-                SUM(lama_dirawat)
-                    AS jumlah_lama_dirawat,
-
-                SUM(lama_episode)
-                    AS jumlah_lama_episode,
-
-                /* ------------------------------------------
-                   JUMLAH HARI PERAWATAN
-                ------------------------------------------ */
-
-                SUM(hari_perawatan)
-                    AS jumlah_hari_perawatan,
-
-                /* ------------------------------------------
-                   HARI PERAWATAN BERDASARKAN KELAS
-                ------------------------------------------ */
-
-                SUM(
-                    CASE
-                        WHEN objectkelasfk = 5
-                            THEN hari_perawatan
-                        ELSE 0
-                    END
-                ) AS kelas_vvip,
-
-                SUM(
-                    CASE
-                        WHEN objectkelasfk = 4
-                            THEN hari_perawatan
-                        ELSE 0
-                    END
-                ) AS kelas_vip,
-
-                SUM(
-                    CASE
-                        WHEN objectkelasfk = 3
-                            THEN hari_perawatan
-                        ELSE 0
-                    END
-                ) AS kelas_1,
-
-                SUM(
-                    CASE
-                        WHEN objectkelasfk = 2
-                            THEN hari_perawatan
-                        ELSE 0
-                    END
-                ) AS kelas_2,
-
-                SUM(
-                    CASE
-                        WHEN objectkelasfk = 1
-                            THEN hari_perawatan
-                        ELSE 0
-                    END
-                ) AS kelas_3,
-
-                SUM(
-                    CASE
-                        WHEN objectkelasfk NOT IN (1,2,3,4,5)
-                            THEN hari_perawatan
-                        ELSE 0
-                    END
-                ) AS kelas_khusus,
-
-                SUM(
-                    CASE
-                        WHEN objectkelasfk IS NULL
-                            THEN hari_perawatan
-                        ELSE 0
-                    END
-                ) AS kelas_tidak_diketahui,
-
-                SUM(pasien_akhir_episode)
-                    AS pasien_akhir_episode
-
-            FROM indikator
-
-            GROUP BY idkonten
-        ),
-
-        /* ==================================================
-           SENSUS AKTUAL BERDASARKAN RIWAYAT APD
-        ================================================== */
-
-        sensus_dasar AS (
-            SELECT
-                k.*,
-
-                LEAST(
-                    k.tglkeluar,
-                    k.waktu_masuk_selanjutnya,
-                    k.waktu_keluar_rs
-                ) AS batas_keluar_apd
-
-            FROM kronologi k
-        ),
-
-        sensus_aktual AS (
-            SELECT
-                s.idkonten,
-
-                COUNT(
-                    DISTINCT s.noregistrasifk
-                ) FILTER (
-
-                    WHERE s.tglmasuk < pr.awal_bulan
-
-                        AND (
-                            s.batas_keluar_apd >= pr.awal_bulan
-
-                            OR s.batas_keluar_apd IS NULL
-                        )
-
-                ) AS pasien_awal_bulan_aktual,
-
-                COUNT(
-                    DISTINCT s.noregistrasifk
-                ) FILTER (
-
-                    WHERE s.tglmasuk < pr.akhir_bulan
-
-                        AND (
-                            s.batas_keluar_apd >= pr.akhir_bulan
-
-                            OR s.batas_keluar_apd IS NULL
-                        )
-
-                ) AS pasien_akhir_bulan_aktual
-
-            FROM sensus_dasar s
-
-            CROSS JOIN periode pr
-
-            GROUP BY s.idkonten
-        ),
-
-        /* ==================================================
-           DAFTAR RUANGAN PER KELOMPOK PELAYANAN
-
-           Digunakan oleh getBedCountForRooms().
-        ================================================== */
-
-        daftar_ruangan AS (
-            SELECT
-                idkonten,
-
-                ARRAY_AGG(
-                    DISTINCT idruangan
-                    ORDER BY idruangan
-                ) AS idruangan_list
-
-            FROM mapping_raw
-
-            GROUP BY idkonten
-        ),
-
-        /* ==================================================
-           AUDIT KUALITAS DATA
-        ================================================== */
-
-        audit_mapping AS (
-            SELECT
-                COUNT(*) AS jumlah_mapping_konflik
-
-            FROM registrasi_konflik
-        ),
-
-        audit_riwayat AS (
-            SELECT
-                COUNT(*) FILTER (
-                    WHERE nomor_duplikat > 1
-                ) AS jumlah_apd_duplikat
-
-            FROM riwayat_raw
-        ),
-
-        audit_kronologi AS (
-            SELECT
-                COUNT(*) FILTER (
-                    WHERE tglkeluar < tglmasuk
-
-                        OR waktu_keluar_rs < tglmasuk
+                    AND (
+                        COALESCE(
+                            pdt.tglmeninggal,
+                            pdt.tglpulang
+                        ) >= pr.awal_bulan
 
                         OR (
-                            waktu_masuk_selanjutnya IS NOT NULL
+                            pdt.tglmeninggal IS NULL
+                            AND pdt.tglpulang IS NULL
+                        )
+                    )
+            ),
 
-                            AND waktu_keluar_rs IS NOT NULL
+            /* ==============================================
+               MASTER PEMETAAN PERINATOLOGI
+            ============================================== */
 
-                            AND waktu_masuk_selanjutnya
-                                >= waktu_keluar_rs
+            mapping_perinatologi AS (
+                SELECT
+                    ru.id AS idruangan,
+
+                    CAST(
+                        $kontenPerinatologiSql AS INTEGER
+                    ) AS idkonten
+
+                FROM ruangan_m ru
+
+                WHERE ru.id IN ($ruanganPerinatologiSql)
+
+                    AND $kontenPerinatologiSql IS NOT NULL
+            ),
+
+            /* ==============================================
+               PEMETAAN LAPORAN YANG SUDAH TERSEDIA
+            ============================================== */
+
+            mapping_existing AS (
+                SELECT DISTINCT
+                    klrl.norecpd,
+                    klrl.idruangan,
+                    klrl.idkonten
+
+                FROM kelompoklaporanrl_t klrl
+
+                INNER JOIN kandidat_periode kd
+                    ON kd.norecpd = klrl.norecpd
+
+                WHERE klrl.statusenabled = TRUE
+
+                    AND klrl.idjenislaporan IN ($placeholders)
+
+                    AND klrl.idruangan IS NOT NULL
+
+                    AND klrl.idkonten IS NOT NULL
+            ),
+
+            /* ==============================================
+               TAMBAHAN PEMETAAN PASIEN PERINATOLOGI
+
+               Pasien Perinatologi tetap masuk laporan
+               meskipun belum tercatat pada tabel
+               kelompoklaporanrl_t.
+
+               Pemetaan Perinatologi diprioritaskan hanya dalam laporan lokal.
+            ============================================== */
+
+            mapping_perinatologi_pasien AS (
+                SELECT DISTINCT
+                    apd.noregistrasifk AS norecpd,
+
+                    apd.objectruanganfk AS idruangan,
+
+                    mp.idkonten
+
+                FROM mapping_perinatologi mp
+
+                INNER JOIN antrianpasiendiperiksa_t apd
+                    ON apd.objectruanganfk = mp.idruangan
+
+                INNER JOIN kandidat_periode kd
+                    ON kd.norecpd = apd.noregistrasifk
+
+                CROSS JOIN periode pr
+
+                WHERE apd.tglmasuk IS NOT NULL
+
+
+                    AND (
+                        kd.waktu_keluar_rs IS NULL
+
+                        OR apd.tglmasuk <= kd.waktu_keluar_rs
+                    )
+
+
+            ),
+
+            /* ==============================================
+               GABUNGKAN PEMETAAN EXISTING DAN PERINATOLOGI
+            ============================================== */
+
+            mapping_raw AS (
+                SELECT me.norecpd, me.idruangan, me.idkonten
+                FROM mapping_existing me
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM mapping_perinatologi_pasien mp
+                    WHERE mp.norecpd = me.norecpd
+                      AND mp.idruangan = me.idruangan
+                )
+                UNION
+                SELECT norecpd, idruangan, idkonten
+                FROM mapping_perinatologi_pasien
+            ),
+
+            /* ==============================================
+               DETEKSI PERINATOLOGI YANG SUDAH DIPETAKAN
+               KE KELOMPOK PELAYANAN LAIN
+            ============================================== */
+
+            audit_perinatologi AS (
+                SELECT
+                    COUNT(
+                        DISTINCT me.norecpd
+                    ) AS perinatologi_mapping_berbeda
+
+                FROM mapping_existing me
+
+                INNER JOIN mapping_perinatologi mp
+                    ON mp.idruangan = me.idruangan
+
+                WHERE me.idkonten <> mp.idkonten
+            ),
+
+            /* ==============================================
+               DETEKSI KONFLIK PEMETAAN
+            ============================================== */
+
+            mapping_konflik AS (
+                SELECT
+                    norecpd,
+                    idruangan
+
+                FROM mapping_raw
+
+                GROUP BY
+                    norecpd,
+                    idruangan
+
+                HAVING COUNT(DISTINCT idkonten) > 1
+            ),
+
+            registrasi_konflik AS (
+                SELECT DISTINCT
+                    norecpd
+
+                FROM mapping_konflik
+            ),
+
+            mapping AS (
+                SELECT
+                    m.norecpd,
+                    m.idruangan,
+                    m.idkonten
+
+                FROM mapping_raw m
+
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM registrasi_konflik mk
+
+                    WHERE mk.norecpd = m.norecpd
+                )
+            ),
+
+            /* ==============================================
+               RIWAYAT RAWAT INAP PASIEN
+            ============================================== */
+
+            riwayat_raw AS (
+                SELECT
+                    apd.norec AS norec_apd,
+
+                    apd.noregistrasifk,
+
+                    apd.objectruanganfk,
+
+                    apd.tglmasuk,
+
+                    apd.tglkeluar,
+
+                    m.idkonten,
+
+                    kd.noregistrasi,
+
+                    kd.nocmfk,
+
+                    kd.tglregistrasi,
+
+                    kd.tglpulang,
+
+                    kd.tglmeninggal,
+
+                    kd.objectstatuskeluarfk,
+
+                    kd.objectkelasfk,
+
+                    kd.waktu_keluar_rs,
+
+                    pm.objectjeniskelaminfk,
+
+                    ROW_NUMBER() OVER (
+                        PARTITION BY
+                            apd.noregistrasifk,
+                            apd.objectruanganfk,
+                            apd.tglmasuk
+
+                        ORDER BY
+                            apd.tglkeluar DESC NULLS LAST,
+                            apd.norec
+                    ) AS nomor_duplikat
+
+                FROM mapping m
+
+                INNER JOIN antrianpasiendiperiksa_t apd
+                    ON apd.noregistrasifk = m.norecpd
+
+                    AND apd.objectruanganfk = m.idruangan
+
+                INNER JOIN kandidat_periode kd
+                    ON kd.norecpd = apd.noregistrasifk
+
+                LEFT JOIN pasien_m pm
+                    ON pm.id = kd.nocmfk
+
+                WHERE apd.tglmasuk IS NOT NULL
+            ),
+
+            /* ==============================================
+               MENGHILANGKAN DUPLIKAT RIWAYAT APD
+            ============================================== */
+
+            riwayat AS (
+                SELECT *
+                FROM riwayat_raw
+
+                WHERE nomor_duplikat = 1
+
+                    AND (
+                        waktu_keluar_rs IS NULL
+                        OR tglmasuk <= waktu_keluar_rs
+                    )
+
+                    AND (
+                        tglkeluar IS NULL
+                        OR tglkeluar >= tglmasuk
+                    )
+            ),
+
+            /* ==============================================
+               KRONOLOGI PERPINDAHAN PASIEN
+            ============================================== */
+
+            kronologi AS (
+                SELECT
+                    r.*,
+
+                    MIN(r.tglmasuk) OVER (
+                        PARTITION BY r.noregistrasifk
+                    ) AS awal_rawat_inap,
+
+                    LAG(r.idkonten) OVER (
+                        PARTITION BY r.noregistrasifk
+
+                        ORDER BY
+                            r.tglmasuk,
+                            r.norec_apd
+                    ) AS kelompok_sebelumnya,
+
+                    LEAD(r.idkonten) OVER (
+                        PARTITION BY r.noregistrasifk
+
+                        ORDER BY
+                            r.tglmasuk,
+                            r.norec_apd
+                    ) AS kelompok_selanjutnya,
+
+                    LEAD(r.tglmasuk) OVER (
+                        PARTITION BY r.noregistrasifk
+
+                        ORDER BY
+                            r.tglmasuk,
+                            r.norec_apd
+                    ) AS waktu_masuk_selanjutnya
+
+                FROM riwayat r
+            ),
+
+            /* ==============================================
+               MENANDAI EPISODE KELOMPOK PELAYANAN
+            ============================================== */
+
+            penanda_episode AS (
+                SELECT
+                    k.*,
+
+                    CASE
+                        WHEN k.kelompok_sebelumnya IS NULL
+                            THEN 1
+
+                        WHEN k.kelompok_sebelumnya
+                            IS DISTINCT FROM k.idkonten
+                            THEN 1
+
+                        ELSE 0
+
+                    END AS episode_baru
+
+                FROM kronologi k
+            ),
+
+            nomor_episode AS (
+                SELECT
+                    p.*,
+
+                    SUM(p.episode_baru) OVER (
+                        PARTITION BY p.noregistrasifk
+
+                        ORDER BY
+                            p.tglmasuk,
+                            p.norec_apd
+
+                        ROWS BETWEEN
+                            UNBOUNDED PRECEDING
+                            AND CURRENT ROW
+                    ) AS episode_id
+
+                FROM penanda_episode p
+            ),
+
+            /* ==============================================
+               GABUNGKAN RUANGAN DENGAN KELOMPOK SAMA
+            ============================================== */
+
+            episode_dasar AS (
+                SELECT
+                    noregistrasifk,
+                    noregistrasi,
+                    nocmfk,
+                    idkonten,
+                    episode_id,
+
+                    MIN(tglmasuk)
+                        AS mulai_episode,
+
+                    MAX(awal_rawat_inap)
+                        AS awal_rawat_inap,
+
+                    MAX(tglregistrasi)
+                        AS tglregistrasi,
+
+                    MAX(tglpulang)
+                        AS tglpulang,
+
+                    MAX(tglmeninggal)
+                        AS tglmeninggal,
+
+                    MAX(waktu_keluar_rs)
+                        AS waktu_keluar_rs,
+
+                    MAX(objectstatuskeluarfk)
+                        AS objectstatuskeluarfk,
+
+                    MAX(objectkelasfk)
+                        AS objectkelasfk,
+
+                    MAX(objectjeniskelaminfk)
+                        AS objectjeniskelaminfk
+
+                FROM nomor_episode
+
+                GROUP BY
+                    noregistrasifk,
+                    noregistrasi,
+                    nocmfk,
+                    idkonten,
+                    episode_id
+            ),
+
+            /* ==============================================
+               MENENTUKAN ASAL DAN TUJUAN MUTASI
+            ============================================== */
+
+            episode_kronologi AS (
+                SELECT
+                    e.*,
+
+                    LAG(e.idkonten) OVER (
+                        PARTITION BY e.noregistrasifk
+                        ORDER BY e.episode_id
+                    ) AS asal_kelompok,
+
+                    LEAD(e.idkonten) OVER (
+                        PARTITION BY e.noregistrasifk
+                        ORDER BY e.episode_id
+                    ) AS tujuan_kelompok,
+
+                    LEAD(e.mulai_episode) OVER (
+                        PARTITION BY e.noregistrasifk
+                        ORDER BY e.episode_id
+                    ) AS mulai_episode_selanjutnya
+
+                FROM episode_dasar e
+            ),
+
+            /* ==============================================
+               MENENTUKAN AKHIR EPISODE PERAWATAN
+            ============================================== */
+
+            episode AS (
+                SELECT
+                    e.*,
+
+                    LEAST(
+                        e.mulai_episode_selanjutnya,
+                        e.waktu_keluar_rs
+                    ) AS akhir_episode
+
+                FROM episode_kronologi e
+            ),
+
+            /* ==============================================
+               MEMBATASI EPISODE SESUAI PERIODE LAPORAN
+            ============================================== */
+
+            episode_periode AS (
+                SELECT
+                    e.*,
+
+                    pr.awal_bulan,
+
+                    pr.akhir_bulan,
+
+                    GREATEST(
+                        e.mulai_episode,
+                        pr.awal_bulan
+                    ) AS mulai_hitung,
+
+                    LEAST(
+                        COALESCE(
+                            e.akhir_episode,
+                            pr.akhir_bulan
+                        ),
+                        pr.akhir_bulan
+                    ) AS akhir_hitung
+
+                FROM episode e
+
+                CROSS JOIN periode pr
+
+                WHERE e.mulai_episode < pr.akhir_bulan
+
+                    AND (
+                        e.akhir_episode >= pr.awal_bulan
+                        OR e.akhir_episode IS NULL
+                    )
+
+                    AND (
+                        e.akhir_episode >= e.mulai_episode
+                        OR e.akhir_episode IS NULL
+                    )
+            ),
+
+            /* ==============================================
+               PERHITUNGAN INDIKATOR RL 3.2
+            ============================================== */
+
+            indikator AS (
+                SELECT
+                    ep.*,
+
+                    /* PASIEN AWAL BULAN */
+
+                    CASE
+                        WHEN ep.mulai_episode < ep.awal_bulan
+
+                            AND (
+                                ep.akhir_episode >= ep.awal_bulan
+                                OR ep.akhir_episode IS NULL
+                            )
+
+                        THEN 1 ELSE 0
+
+                    END AS pasien_awal_bulan,
+
+                    /* PASIEN MASUK BARU */
+
+                    CASE
+                        WHEN ep.asal_kelompok IS NULL
+
+                            AND ep.mulai_episode >= ep.awal_bulan
+
+                            AND ep.mulai_episode < ep.akhir_bulan
+
+                        THEN 1 ELSE 0
+
+                    END AS pasien_masuk,
+
+                    /* PASIEN PINDAHAN */
+
+                    CASE
+                        WHEN ep.asal_kelompok IS NOT NULL
+
+                            AND ep.mulai_episode >= ep.awal_bulan
+
+                            AND ep.mulai_episode < ep.akhir_bulan
+
+                        THEN 1 ELSE 0
+
+                    END AS pasien_pindahan,
+
+                    /* PASIEN DIPINDAHKAN */
+
+                    CASE
+                        WHEN ep.tujuan_kelompok IS NOT NULL
+
+                            AND ep.akhir_episode =
+                                ep.mulai_episode_selanjutnya
+
+                            AND ep.akhir_episode >= ep.awal_bulan
+
+                            AND ep.akhir_episode < ep.akhir_bulan
+
+                        THEN 1 ELSE 0
+
+                    END AS pasien_dipindahkan,
+
+                    /* PASIEN KELUAR HIDUP */
+
+                    CASE
+                        WHEN ep.tujuan_kelompok IS NULL
+
+                            AND ep.tglmeninggal IS NULL
+
+                            AND ep.tglpulang >= ep.awal_bulan
+
+                            AND ep.tglpulang < ep.akhir_bulan
+
+                        THEN 1 ELSE 0
+
+                    END AS pasien_keluar_hidup,
+
+                    /* PASIEN KELUAR MENINGGAL */
+
+                    CASE
+                        WHEN ep.tujuan_kelompok IS NULL
+
+                            AND ep.tglmeninggal >= ep.awal_bulan
+
+                            AND ep.tglmeninggal < ep.akhir_bulan
+
+                        THEN 1 ELSE 0
+
+                    END AS pasien_keluar_mati,
+
+                    /* PASIEN AKHIR BULAN */
+
+                    CASE
+                        WHEN ep.mulai_episode < ep.akhir_bulan
+
+                            AND (
+                                ep.akhir_episode >= ep.akhir_bulan
+                                OR ep.akhir_episode IS NULL
+                            )
+
+                        THEN 1 ELSE 0
+
+                    END AS pasien_akhir_episode,
+
+                    /* JUMLAH LAMA DIRAWAT */
+
+                    CASE
+                        WHEN ep.tujuan_kelompok IS NULL
+
+                            AND ep.waktu_keluar_rs >= ep.awal_bulan
+
+                            AND ep.waktu_keluar_rs < ep.akhir_bulan
+
+                            AND ep.waktu_keluar_rs >=
+                                ep.awal_rawat_inap
+
+                        THEN GREATEST(
+                            ep.waktu_keluar_rs::DATE
+                            - ep.awal_rawat_inap::DATE,
+                            1
                         )
 
-                ) AS jumlah_kronologi_tidak_valid,
+                        ELSE 0
 
-                COUNT(*) FILTER (
-                    WHERE tglkeluar IS NOT NULL
+                    END AS lama_dirawat,
 
-                        AND waktu_masuk_selanjutnya IS NOT NULL
+                    /* JUMLAH LAMA EPISODE PELAYANAN */
 
-                        AND tglkeluar < waktu_masuk_selanjutnya
+                    CASE
+                        WHEN ep.akhir_episode >= ep.awal_bulan
 
-                ) AS jumlah_jeda_riwayat,
+                            AND ep.akhir_episode < ep.akhir_bulan
 
-                COUNT(*) FILTER (
-                    WHERE tglkeluar IS NOT NULL
+                        THEN GREATEST(
+                            ep.akhir_episode::DATE
+                            - ep.mulai_episode::DATE,
+                            1
+                        )
 
-                        AND waktu_masuk_selanjutnya IS NOT NULL
+                        ELSE 0
 
-                        AND tglkeluar > waktu_masuk_selanjutnya
+                    END AS lama_episode,
 
-                ) AS jumlah_riwayat_tumpang_tindih
+                    /* JUMLAH HARI PERAWATAN */
 
-            FROM kronologi
-        ),
+                    CASE
+                        WHEN ep.akhir_hitung < ep.mulai_hitung
+                            THEN 0
 
-        audit_apd AS (
-            SELECT
-                COUNT(*) AS jumlah_kandidat_tanpa_apd
+                        WHEN ep.tujuan_kelompok IS NULL
 
-            FROM kandidat kd
+                            AND ep.waktu_keluar_rs >= ep.awal_bulan
 
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM registrasi_konflik mk
-                WHERE mk.norecpd = kd.norecpd
-            )
+                            AND ep.waktu_keluar_rs < ep.akhir_bulan
 
-            AND NOT EXISTS (
-                SELECT 1
-                FROM riwayat r
-                WHERE r.noregistrasifk = kd.norecpd
-            )
-        )
+                            AND ep.awal_rawat_inap::DATE =
+                                ep.waktu_keluar_rs::DATE
 
-        /* ==================================================
-           HASIL AKHIR LAPORAN RL 3.2
-        ================================================== */
+                            AND ep.awal_rawat_inap >= ep.awal_bulan
 
-        SELECT
-            kon.id AS idkonten,
+                        THEN 1
 
-            kon.reportdisplay AS \"jenisPelayanan\",
+                        ELSE GREATEST(
+                            ep.akhir_hitung::DATE
+                            - ep.mulai_hitung::DATE,
+                            0
+                        )
 
-            COALESCE(r.pasien_awal_bulan, 0)
-                AS pasien_awal_bulan,
+                    END AS hari_perawatan
 
-            COALESCE(r.pasien_masuk, 0)
-                AS pasien_masuk,
+                FROM episode_periode ep
+            ),
 
-            COALESCE(r.pasien_pindahan, 0)
-                AS pasien_pindahan,
+            /* ==============================================
+               REKAPITULASI PER KELOMPOK PELAYANAN
+            ============================================== */
 
-            COALESCE(r.pasien_dipindahkan, 0)
-                AS pasien_dipindahkan,
+            rekap AS (
+                SELECT
+                    idkonten,
 
-            COALESCE(r.pasien_keluar_hidup, 0)
-                AS pasien_keluar_hidup,
+                    SUM(pasien_awal_bulan)
+                        AS pasien_awal_bulan,
 
-            COALESCE(r.pasien_keluar_mati, 0)
-                AS pasien_keluar_mati,
+                    SUM(pasien_masuk)
+                        AS pasien_masuk,
 
-            COALESCE(
-                r.pasien_meninggal_kurang_48_jam_laki,
-                0
-            ) AS pasien_meninggal_kurang_48_jam_laki,
+                    SUM(pasien_pindahan)
+                        AS pasien_pindahan,
 
-            COALESCE(
-                r.pasien_meninggal_kurang_48_jam_cewe,
-                0
-            ) AS pasien_meninggal_kurang_48_jam_cewe,
+                    SUM(pasien_dipindahkan)
+                        AS pasien_dipindahkan,
 
-            COALESCE(
-                r.pasien_meninggal_lebih_48_jam_laki,
-                0
-            ) AS pasien_meninggal_lebih_48_jam_laki,
+                    SUM(pasien_keluar_hidup)
+                        AS pasien_keluar_hidup,
 
-            COALESCE(
-                r.pasien_meninggal_lebih_48_jam_cewe,
-                0
-            ) AS pasien_meninggal_lebih_48_jam_cewe,
+                    SUM(pasien_keluar_mati)
+                        AS pasien_keluar_mati,
 
-            COALESCE(r.jumlah_lama_dirawat, 0)
-                AS jumlah_lama_dirawat,
+                    /* MENINGGAL KURANG 48 JAM LAKI-LAKI */
 
-            COALESCE(r.jumlah_lama_episode, 0)
-                AS jumlah_lama_episode,
+                    COUNT(*) FILTER (
+                        WHERE pasien_keluar_mati = 1
 
-            COALESCE(r.jumlah_hari_perawatan, 0)
-                AS jumlah_hari_perawatan,
+                            AND objectjeniskelaminfk = 1
 
-            COALESCE(r.kelas_vvip, 0)
-                AS kelas_vvip,
+                            AND tglmeninggal >= awal_rawat_inap
 
-            COALESCE(r.kelas_vip, 0)
-                AS kelas_vip,
+                            AND tglmeninggal - awal_rawat_inap
+                                < INTERVAL '48 hours'
 
-            COALESCE(r.kelas_1, 0)
-                AS kelas_1,
+                    ) AS pasien_meninggal_kurang_48_jam_laki,
 
-            COALESCE(r.kelas_2, 0)
-                AS kelas_2,
+                    /* MENINGGAL KURANG 48 JAM PEREMPUAN */
 
-            COALESCE(r.kelas_3, 0)
-                AS kelas_3,
+                    COUNT(*) FILTER (
+                        WHERE pasien_keluar_mati = 1
 
-            COALESCE(r.kelas_khusus, 0)
-                AS kelas_khusus,
+                            AND objectjeniskelaminfk = 2
 
-            COALESCE(r.kelas_tidak_diketahui, 0)
-                AS kelas_tidak_diketahui,
+                            AND tglmeninggal >= awal_rawat_inap
 
-            COALESCE(r.pasien_akhir_episode, 0)
-                AS pasien_akhir_episode,
+                            AND tglmeninggal - awal_rawat_inap
+                                < INTERVAL '48 hours'
 
-            COALESCE(sa.pasien_awal_bulan_aktual, 0)
-                AS pasien_awal_bulan_aktual,
+                    ) AS pasien_meninggal_kurang_48_jam_cewe,
 
-            COALESCE(sa.pasien_akhir_bulan_aktual, 0)
-                AS pasien_akhir_bulan_aktual,
+                    /* MENINGGAL MINIMAL 48 JAM LAKI-LAKI */
 
-            dr.idruangan_list,
+                    COUNT(*) FILTER (
+                        WHERE pasien_keluar_mati = 1
 
-            am.jumlah_mapping_konflik,
+                            AND objectjeniskelaminfk = 1
 
-            ar.jumlah_apd_duplikat,
+                            AND tglmeninggal - awal_rawat_inap
+                                >= INTERVAL '48 hours'
 
-            ak.jumlah_kronologi_tidak_valid,
+                    ) AS pasien_meninggal_lebih_48_jam_laki,
 
-            ak.jumlah_jeda_riwayat,
+                    /* MENINGGAL MINIMAL 48 JAM PEREMPUAN */
 
-            ak.jumlah_riwayat_tumpang_tindih,
+                    COUNT(*) FILTER (
+                        WHERE pasien_keluar_mati = 1
 
-            aa.jumlah_kandidat_tanpa_apd
-
-        FROM daftar_ruangan dr
+                            AND objectjeniskelaminfk = 2
 
-        INNER JOIN kelompoklaporan_m kon
-            ON kon.id = dr.idkonten
+                            AND tglmeninggal - awal_rawat_inap
+                                >= INTERVAL '48 hours'
 
-        LEFT JOIN rekap r
-            ON r.idkonten = kon.id
+                    ) AS pasien_meninggal_lebih_48_jam_cewe,
 
-        LEFT JOIN sensus_aktual sa
-            ON sa.idkonten = kon.id
+                    /* LAMA DIRAWAT DAN HARI PERAWATAN */
 
-        CROSS JOIN audit_mapping am
+                    SUM(lama_dirawat)
+                        AS jumlah_lama_dirawat,
 
-        CROSS JOIN audit_riwayat ar
+                    SUM(lama_episode)
+                        AS jumlah_lama_episode,
 
-        CROSS JOIN audit_kronologi ak
-
-        CROSS JOIN audit_apd aa
+                    SUM(hari_perawatan)
+                        AS jumlah_hari_perawatan,
 
-        ORDER BY kon.id
-    ";
-
-    /*
-    |--------------------------------------------------------------------------
-    | 4. Eksekusi query
-    |--------------------------------------------------------------------------
-    */
-
-    $bindings = array_merge(
-        [
-            $awalBulan->format('Y-m-d H:i:s'),
-            $batasLaporan->format('Y-m-d H:i:s')
-        ],
-        $idjenislaporan
-    );
-
-    $data = collect(
-        DB::connection('pgsql')->select(
-            $sql,
-            $bindings
-        )
-    );
-
-    /*
-    |--------------------------------------------------------------------------
-    | 5. Pengolahan hasil query
-    |--------------------------------------------------------------------------
-    */
-
-    $bedCache = [];
-
-    $numericFields = [
-        'pasien_awal_bulan',
-        'pasien_masuk',
-        'pasien_pindahan',
-        'pasien_dipindahkan',
-        'pasien_keluar_hidup',
-        'pasien_keluar_mati',
-        'pasien_meninggal_kurang_48_jam_laki',
-        'pasien_meninggal_kurang_48_jam_cewe',
-        'pasien_meninggal_lebih_48_jam_laki',
-        'pasien_meninggal_lebih_48_jam_cewe',
-        'jumlah_lama_dirawat',
-        'jumlah_lama_episode',
-        'jumlah_hari_perawatan',
-        'kelas_vvip',
-        'kelas_vip',
-        'kelas_1',
-        'kelas_2',
-        'kelas_3',
-        'kelas_khusus',
-        'kelas_tidak_diketahui',
-        'pasien_awal_bulan_aktual',
-        'pasien_akhir_bulan_aktual',
-        'pasien_akhir_episode',
-        'jumlah_mapping_konflik',
-        'jumlah_apd_duplikat',
-        'jumlah_kronologi_tidak_valid',
-        'jumlah_jeda_riwayat',
-        'jumlah_riwayat_tumpang_tindih',
-        'jumlah_kandidat_tanpa_apd'
-    ];
-
-    foreach ($data as $item) {
-
-        /*
-        |----------------------------------------------
-        | Konversi hasil agregasi menjadi integer
-        |----------------------------------------------
-        */
-
-        foreach ($numericFields as $field) {
-            $item->{$field} = (int) ($item->{$field} ?? 0);
-        }
-
-        /*
-        |----------------------------------------------
-        | Konversi array ruangan PostgreSQL
-        |----------------------------------------------
-        */
-
-        $idRuanganList = $item->idruangan_list ?? [];
-
-        if (is_string($idRuanganList)) {
-
-            $idRuanganList = str_replace(
-                ['{', '}'],
-                '',
-                $idRuanganList
-            );
-
-            $idRuanganList = explode(
-                ',',
-                $idRuanganList
-            );
-        }
-
-        $idRuanganList = array_values(
-            array_unique(
-                array_filter(
-                    array_map(
-                        'intval',
-                        $idRuanganList
-                    ),
-                    function ($id) {
-                        return $id > 0;
-                    }
+                    /* HARI PERAWATAN BERDASARKAN KELAS */
+
+                    SUM(
+                        CASE WHEN objectkelasfk = 5
+                            THEN hari_perawatan ELSE 0 END
+                    ) AS kelas_vvip,
+
+                    SUM(
+                        CASE WHEN objectkelasfk = 4
+                            THEN hari_perawatan ELSE 0 END
+                    ) AS kelas_vip,
+
+                    SUM(
+                        CASE WHEN objectkelasfk = 3
+                            THEN hari_perawatan ELSE 0 END
+                    ) AS kelas_1,
+
+                    SUM(
+                        CASE WHEN objectkelasfk = 2
+                            THEN hari_perawatan ELSE 0 END
+                    ) AS kelas_2,
+
+                    SUM(
+                        CASE WHEN objectkelasfk = 1
+                            THEN hari_perawatan ELSE 0 END
+                    ) AS kelas_3,
+
+                    SUM(
+                        CASE
+                            WHEN objectkelasfk NOT IN (1,2,3,4,5)
+                                THEN hari_perawatan
+                            ELSE 0
+                        END
+                    ) AS kelas_khusus,
+
+                    SUM(
+                        CASE
+                            WHEN objectkelasfk IS NULL
+                                THEN hari_perawatan
+                            ELSE 0
+                        END
+                    ) AS kelas_tidak_diketahui,
+
+                    SUM(pasien_akhir_episode)
+                        AS pasien_akhir_episode
+
+                FROM indikator
+
+                GROUP BY idkonten
+            ),
+
+            /* ==============================================
+               SENSUS AKTUAL BERDASARKAN RIWAYAT APD
+            ============================================== */
+
+            sensus_dasar AS (
+                SELECT
+                    k.*,
+
+                    LEAST(
+                        k.tglkeluar,
+                        k.waktu_masuk_selanjutnya,
+                        k.waktu_keluar_rs
+                    ) AS batas_keluar_apd
+
+                FROM kronologi k
+            ),
+
+            sensus_aktual AS (
+                SELECT
+                    s.idkonten,
+
+                    COUNT(
+                        DISTINCT s.noregistrasifk
+                    ) FILTER (
+                        WHERE s.tglmasuk < pr.awal_bulan
+
+                            AND (
+                                s.batas_keluar_apd >= pr.awal_bulan
+
+                                OR s.batas_keluar_apd IS NULL
+                            )
+                    ) AS pasien_awal_bulan_aktual,
+
+                    COUNT(
+                        DISTINCT s.noregistrasifk
+                    ) FILTER (
+                        WHERE s.tglmasuk < pr.akhir_bulan
+
+                            AND (
+                                s.batas_keluar_apd >= pr.akhir_bulan
+
+                                OR s.batas_keluar_apd IS NULL
+                            )
+                    ) AS pasien_akhir_bulan_aktual
+
+                FROM sensus_dasar s
+
+                CROSS JOIN periode pr
+
+                GROUP BY s.idkonten
+            ),
+
+            /* ==============================================
+               DAFTAR RUANGAN
+
+               Perinatologi tetap ditampilkan meskipun
+               tidak mempunyai transaksi pada periode.
+            ============================================== */
+
+            daftar_ruangan AS (
+                SELECT
+                    x.idkonten,
+
+                    ARRAY_AGG(
+                        DISTINCT x.idruangan
+                        ORDER BY x.idruangan
+                    ) AS idruangan_list
+
+                FROM (
+                    SELECT DISTINCT
+                        idkonten,
+                        idruangan
+
+                    FROM mapping_raw mr
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM mapping_perinatologi mp
+                        WHERE mp.idruangan = mr.idruangan
+                          AND mp.idkonten <> mr.idkonten
+                    )
+
+                    UNION
+
+                    SELECT
+                        idkonten,
+                        idruangan
+
+                    FROM mapping_perinatologi
+
+                ) x
+
+                GROUP BY x.idkonten
+            ),
+
+            /* ==============================================
+               AUDIT PEMETAAN
+            ============================================== */
+
+            audit_mapping AS (
+                SELECT
+                    COUNT(*) AS jumlah_mapping_konflik
+
+                FROM registrasi_konflik
+            ),
+
+            audit_mapping_baru AS (
+                SELECT
+                    COUNT(
+                        DISTINCT norecpd
+                    ) AS jumlah_pasien_tambahan_perinatologi
+
+                FROM mapping_perinatologi_pasien
+            ),
+
+            /* ==============================================
+               AUDIT DUPLIKASI DAN KRONOLOGI
+            ============================================== */
+
+            audit_riwayat AS (
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE nomor_duplikat > 1
+                    ) AS jumlah_apd_duplikat,
+
+                    COUNT(*) FILTER (
+                        WHERE tglkeluar < tglmasuk
+
+                            OR waktu_keluar_rs < tglmasuk
+
+                    ) AS jumlah_kronologi_tidak_valid
+
+                FROM riwayat_raw
+            ),
+
+            audit_kronologi AS (
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE tglkeluar IS NOT NULL
+
+                            AND waktu_masuk_selanjutnya IS NOT NULL
+
+                            AND tglkeluar < waktu_masuk_selanjutnya
+
+                    ) AS jumlah_jeda_riwayat,
+
+                    COUNT(*) FILTER (
+                        WHERE tglkeluar IS NOT NULL
+
+                            AND waktu_masuk_selanjutnya IS NOT NULL
+
+                            AND tglkeluar > waktu_masuk_selanjutnya
+
+                    ) AS jumlah_riwayat_tumpang_tindih,
+
+                    COUNT(*) FILTER (
+                        WHERE waktu_masuk_selanjutnya = tglmasuk
+                    ) AS jumlah_waktu_masuk_bersamaan
+
+                FROM kronologi
+            ),
+
+            audit_apd AS (
+                SELECT
+                    COUNT(
+                        DISTINCT m.norecpd
+                    ) AS jumlah_kandidat_tanpa_apd
+
+                FROM mapping m
+
+                WHERE NOT EXISTS (
+                    SELECT 1
+
+                    FROM riwayat r
+
+                    WHERE r.noregistrasifk = m.norecpd
                 )
+            ),
+
+            audit_perinatologi_tahap AS (
+                SELECT
+                    (SELECT COUNT(DISTINCT m.norecpd)
+                     FROM mapping_perinatologi_pasien m) AS perinatologi_terpetakan,
+                    (SELECT COUNT(DISTINCT m.norecpd)
+                     FROM mapping_perinatologi_pasien m
+                     JOIN registrasi_konflik k ON k.norecpd = m.norecpd) AS perinatologi_konflik,
+                    (SELECT COUNT(DISTINCT r.noregistrasifk)
+                     FROM riwayat r WHERE r.idkonten = $kontenPerinatologiSql) AS perinatologi_riwayat_valid,
+                    (SELECT COUNT(DISTINCT i.noregistrasifk)
+                     FROM indikator i WHERE i.idkonten = $kontenPerinatologiSql) AS perinatologi_episode_periode
+            )
+
+            /* ==============================================
+               HASIL AKHIR LAPORAN
+            ============================================== */
+
+            SELECT
+                dr.idkonten AS idkonten,
+
+                CASE WHEN dr.idkonten = $kontenPerinatologiSql
+                    THEN 'Perinatologi'
+                    ELSE kon.reportdisplay
+                END AS \"jenisPelayanan\",
+
+                COALESCE(r.pasien_awal_bulan, 0)
+                    AS pasien_awal_bulan,
+
+                COALESCE(r.pasien_masuk, 0)
+                    AS pasien_masuk,
+
+                COALESCE(r.pasien_pindahan, 0)
+                    AS pasien_pindahan,
+
+                COALESCE(r.pasien_dipindahkan, 0)
+                    AS pasien_dipindahkan,
+
+                COALESCE(r.pasien_keluar_hidup, 0)
+                    AS pasien_keluar_hidup,
+
+                COALESCE(r.pasien_keluar_mati, 0)
+                    AS pasien_keluar_mati,
+
+                COALESCE(
+                    r.pasien_meninggal_kurang_48_jam_laki,
+                    0
+                ) AS pasien_meninggal_kurang_48_jam_laki,
+
+                COALESCE(
+                    r.pasien_meninggal_kurang_48_jam_cewe,
+                    0
+                ) AS pasien_meninggal_kurang_48_jam_cewe,
+
+                COALESCE(
+                    r.pasien_meninggal_lebih_48_jam_laki,
+                    0
+                ) AS pasien_meninggal_lebih_48_jam_laki,
+
+                COALESCE(
+                    r.pasien_meninggal_lebih_48_jam_cewe,
+                    0
+                ) AS pasien_meninggal_lebih_48_jam_cewe,
+
+                COALESCE(r.jumlah_lama_dirawat, 0)
+                    AS jumlah_lama_dirawat,
+
+                COALESCE(r.jumlah_lama_episode, 0)
+                    AS jumlah_lama_episode,
+
+                COALESCE(r.jumlah_hari_perawatan, 0)
+                    AS jumlah_hari_perawatan,
+
+                COALESCE(r.kelas_vvip, 0)
+                    AS kelas_vvip,
+
+                COALESCE(r.kelas_vip, 0)
+                    AS kelas_vip,
+
+                COALESCE(r.kelas_1, 0)
+                    AS kelas_1,
+
+                COALESCE(r.kelas_2, 0)
+                    AS kelas_2,
+
+                COALESCE(r.kelas_3, 0)
+                    AS kelas_3,
+
+                COALESCE(r.kelas_khusus, 0)
+                    AS kelas_khusus,
+
+                COALESCE(r.kelas_tidak_diketahui, 0)
+                    AS kelas_tidak_diketahui,
+
+                COALESCE(r.pasien_akhir_episode, 0)
+                    AS pasien_akhir_episode,
+
+                COALESCE(sa.pasien_awal_bulan_aktual, 0)
+                    AS pasien_awal_bulan_aktual,
+
+                COALESCE(sa.pasien_akhir_bulan_aktual, 0)
+                    AS pasien_akhir_bulan_aktual,
+
+                dr.idruangan_list,
+
+                am.jumlah_mapping_konflik,
+
+                amb.jumlah_pasien_tambahan_perinatologi,
+
+                ap.perinatologi_mapping_berbeda,
+
+                ar.jumlah_apd_duplikat,
+
+                ar.jumlah_kronologi_tidak_valid,
+
+                ak.jumlah_jeda_riwayat,
+
+                ak.jumlah_riwayat_tumpang_tindih,
+
+                ak.jumlah_waktu_masuk_bersamaan,
+
+                aa.jumlah_kandidat_tanpa_apd,
+                apt.perinatologi_terpetakan,
+                apt.perinatologi_konflik,
+                apt.perinatologi_riwayat_valid,
+                apt.perinatologi_episode_periode,
+
+                CASE
+                    WHEN dr.idkonten = $kontenPerinatologiSql
+                        THEN 1
+                    ELSE 0
+                END AS is_perinatologi
+
+            FROM daftar_ruangan dr
+
+            LEFT JOIN kelompoklaporan_m kon
+                ON kon.id = dr.idkonten
+
+            LEFT JOIN rekap r
+                ON r.idkonten = dr.idkonten
+
+            LEFT JOIN sensus_aktual sa
+                ON sa.idkonten = dr.idkonten
+
+            CROSS JOIN audit_mapping am
+
+            CROSS JOIN audit_mapping_baru amb
+
+            CROSS JOIN audit_perinatologi ap
+
+            CROSS JOIN audit_riwayat ar
+
+            CROSS JOIN audit_kronologi ak
+
+            CROSS JOIN audit_apd aa
+            CROSS JOIN audit_perinatologi_tahap apt
+
+            WHERE kon.id IS NOT NULL OR dr.idkonten = $kontenPerinatologiSql
+            ORDER BY dr.idkonten
+        ";
+
+        /*
+        |--------------------------------------------------------------------------
+        | 5. Eksekusi query
+        |--------------------------------------------------------------------------
+        */
+
+        $bindings = array_merge(
+            [
+                $awalBulan->format('Y-m-d H:i:s'),
+                $batasLaporan->format('Y-m-d H:i:s')
+            ],
+            $idjenislaporan
+        );
+
+        Log::info('RL3.2 - Mulai perhitungan', [
+            'bulan' => $bulan,
+            'tahun' => $tahun,
+            'idjenislaporan' => $idjenislaporan,
+            'id_ruangan_perinatologi' => $idRuanganPerinatologi,
+            'id_konten_perinatologi' => $idKontenPerinatologi
+        ]);
+
+        $data = collect(
+            $db->select(
+                $sql,
+                $bindings
             )
         );
 
-        sort($idRuanganList);
-
-        $item->idruangan_array = $idRuanganList;
+        Log::info('RL3.2 - Query berhasil', [
+            'jumlah_kelompok' => $data->count(),
+            'durasi_detik' => round(
+                microtime(true) - $startTime,
+                2
+            )
+        ]);
 
         /*
-        |----------------------------------------------
-        | Menghitung jumlah tempat tidur
-        |
-        | Tetap menggunakan fungsi yang sebelumnya
-        | sudah tersedia pada controller.
-        |----------------------------------------------
+        |--------------------------------------------------------------------------
+        | 6. Pengolahan hasil query
+        |--------------------------------------------------------------------------
         */
 
-        $cacheKey = implode(',', $idRuanganList);
+        $tahap = 'pengolahan_hasil';
+
+        $bedCache = [];
+
+        $numericFields = [
+            'pasien_awal_bulan',
+            'pasien_masuk',
+            'pasien_pindahan',
+            'pasien_dipindahkan',
+            'pasien_keluar_hidup',
+            'pasien_keluar_mati',
+            'pasien_meninggal_kurang_48_jam_laki',
+            'pasien_meninggal_kurang_48_jam_cewe',
+            'pasien_meninggal_lebih_48_jam_laki',
+            'pasien_meninggal_lebih_48_jam_cewe',
+            'jumlah_lama_dirawat',
+            'jumlah_lama_episode',
+            'jumlah_hari_perawatan',
+            'kelas_vvip',
+            'kelas_vip',
+            'kelas_1',
+            'kelas_2',
+            'kelas_3',
+            'kelas_khusus',
+            'kelas_tidak_diketahui',
+            'pasien_awal_bulan_aktual',
+            'pasien_akhir_bulan_aktual',
+            'pasien_akhir_episode',
+            'jumlah_mapping_konflik',
+            'jumlah_pasien_tambahan_perinatologi',
+            'perinatologi_mapping_berbeda',
+            'jumlah_apd_duplikat',
+            'jumlah_kronologi_tidak_valid',
+            'jumlah_jeda_riwayat',
+            'jumlah_riwayat_tumpang_tindih',
+            'jumlah_waktu_masuk_bersamaan',
+            'jumlah_kandidat_tanpa_apd',
+            'is_perinatologi'
+        ];
+
+        foreach ($data as $item) {
+
+            /*
+            |----------------------------------------------
+            | Konversi angka PostgreSQL menjadi integer
+            |----------------------------------------------
+            */
+
+            foreach ($numericFields as $field) {
+                $item->{$field} = (int) (
+                    $item->{$field} ?? 0
+                );
+            }
+
+            /*
+            |----------------------------------------------
+            | Konversi array ID ruangan
+            |----------------------------------------------
+            */
+
+            $idRuanganList = $item->idruangan_list ?? [];
+
+            if (is_string($idRuanganList)) {
+
+                $idRuanganList = explode(
+                    ',',
+                    trim($idRuanganList, '{}')
+                );
+            }
+
+            $idRuanganList = array_values(
+                array_unique(
+                    array_filter(
+                        array_map(
+                            'intval',
+                            $idRuanganList
+                        ),
+                        function ($id) {
+                            return $id > 0;
+                        }
+                    )
+                )
+            );
+
+            /*
+             * Pastikan ruangan Perinatologi masuk
+             * dalam perhitungan jumlah tempat tidur.
+             */
+
+            if ($item->is_perinatologi === 1) {
+
+                $idRuanganList = array_values(
+                    array_unique(
+                        array_merge(
+                            $idRuanganList,
+                            $idRuanganPerinatologi
+                        )
+                    )
+                );
+            }
+
+            sort($idRuanganList);
+
+            $item->idruangan_array = $idRuanganList;
+
+            /*
+            |----------------------------------------------
+            | Jumlah tempat tidur
+            |----------------------------------------------
+            */
+
+            $tahap = 'jumlah_tempat_tidur';
+
+            $cacheKey = implode(',', $idRuanganList);
+
+            if (!array_key_exists($cacheKey, $bedCache)) {
+
+                $bedCache[$cacheKey] = empty($idRuanganList)
+                    ? 0
+                    : $this->getBedCountForRooms(
+                        $idRuanganList
+                    );
+            }
+
+            $item->jumlah_tempat_tidur =
+                (int) $bedCache[$cacheKey];
+
+            $tahap = 'validasi_indikator';
+
+            /*
+            |----------------------------------------------
+            | Total pasien meninggal
+            |----------------------------------------------
+            */
+
+            $pasienMeninggalKategori =
+
+                $item->pasien_meninggal_kurang_48_jam_laki
+
+                + $item->pasien_meninggal_kurang_48_jam_cewe
+
+                + $item->pasien_meninggal_lebih_48_jam_laki
+
+                + $item->pasien_meninggal_lebih_48_jam_cewe;
+
+            $item->pasien_meninggal_total =
+                $item->pasien_keluar_mati;
+
+            $item->pasien_meninggal_kategori =
+                $pasienMeninggalKategori;
+
+            $item->selisih_kategori_meninggal =
+
+                $item->pasien_keluar_mati
+
+                - $pasienMeninggalKategori;
+
+            /*
+            |----------------------------------------------
+            | Menghitung pasien akhir bulan
+            |----------------------------------------------
+            */
+
+            $item->pasien_akhir_bulan =
+
+                $item->pasien_awal_bulan
+
+                + $item->pasien_masuk
+
+                + $item->pasien_pindahan
+
+                - $item->pasien_keluar_hidup
+
+                - $item->pasien_keluar_mati
+
+                - $item->pasien_dipindahkan;
+
+            /*
+            |----------------------------------------------
+            | Validasi sensus awal dan akhir bulan
+            |----------------------------------------------
+            */
+
+            $item->selisih_sensus_awal =
+
+                $item->pasien_awal_bulan
+
+                - $item->pasien_awal_bulan_aktual;
+
+            $item->selisih_sensus =
+
+                $item->pasien_akhir_bulan
+
+                - $item->pasien_akhir_bulan_aktual;
+
+            $item->selisih_episode =
+
+                $item->pasien_akhir_bulan
+
+                - $item->pasien_akhir_episode;
+
+            /*
+            |----------------------------------------------
+            | Validasi hari perawatan berdasarkan kelas
+            |----------------------------------------------
+            */
+
+            $item->total_hari_perawatan_kelas =
+
+                $item->kelas_vvip
+
+                + $item->kelas_vip
+
+                + $item->kelas_1
+
+                + $item->kelas_2
+
+                + $item->kelas_3
+
+                + $item->kelas_khusus
+
+                + $item->kelas_tidak_diketahui;
+
+            $item->selisih_hari_perawatan =
+
+                $item->jumlah_hari_perawatan
+
+                - $item->total_hari_perawatan_kelas;
+
+            /*
+            |----------------------------------------------
+            | Status validasi per kelompok pelayanan
+            |----------------------------------------------
+            */
+
+            $item->status_validasi = (
+
+                $item->selisih_sensus_awal === 0
+
+                && $item->selisih_sensus === 0
+
+                && $item->selisih_episode === 0
+
+                && $item->selisih_hari_perawatan === 0
+
+                && $item->selisih_kategori_meninggal === 0
+
+                && $item->kelas_tidak_diketahui === 0
+
+                && $item->pasien_akhir_bulan >= 0
+
+            ) ? 'VALIDASI_INTERNAL_OK'
+                : 'PERLU_VERIFIKASI';
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 7. Summary keseluruhan laporan
+        |--------------------------------------------------------------------------
+        */
+
+        $tahap = 'summary';
+
+        $summary = [];
+
+        $summaryFields = [
+            'pasien_awal_bulan',
+            'pasien_masuk',
+            'pasien_pindahan',
+            'pasien_dipindahkan',
+            'pasien_keluar_hidup',
+            'pasien_keluar_mati',
+            'pasien_meninggal_total',
+            'pasien_akhir_bulan',
+            'pasien_awal_bulan_aktual',
+            'pasien_akhir_bulan_aktual',
+            'jumlah_lama_dirawat',
+            'jumlah_lama_episode',
+            'jumlah_hari_perawatan',
+            'kelas_vvip',
+            'kelas_vip',
+            'kelas_1',
+            'kelas_2',
+            'kelas_3',
+            'kelas_khusus',
+            'kelas_tidak_diketahui',
+            'selisih_sensus_awal',
+            'selisih_sensus',
+            'selisih_hari_perawatan',
+            'selisih_kategori_meninggal'
+        ];
+
+        foreach ($summaryFields as $field) {
+            $summary[$field] = (int) $data->sum($field);
+        }
+
+        /*
+         * Jumlah tempat tidur dihitung dari ID ruangan
+         * unik agar satu ruangan tidak dihitung dua kali.
+         */
+
+        $semuaRuangan = [];
+
+        foreach ($data as $item) {
+
+            $semuaRuangan = array_merge(
+                $semuaRuangan,
+                $item->idruangan_array
+            );
+        }
+
+        $semuaRuangan = array_values(
+            array_unique($semuaRuangan)
+        );
+
+        sort($semuaRuangan);
+
+        $tahap = 'summary_tempat_tidur';
+
+        $cacheKey = implode(',', $semuaRuangan);
 
         if (!array_key_exists($cacheKey, $bedCache)) {
 
-            $bedCache[$cacheKey] = empty($idRuanganList)
+            $bedCache[$cacheKey] = empty($semuaRuangan)
                 ? 0
-                : $this->getBedCountForRooms($idRuanganList);
+                : $this->getBedCountForRooms($semuaRuangan);
         }
 
-        $item->jumlah_tempat_tidur =
+        $summary['jumlah_tempat_tidur'] =
             (int) $bedCache[$cacheKey];
 
-        /*
-        |----------------------------------------------
-        | Hitung pasien meninggal berdasarkan kategori
-        |----------------------------------------------
-        */
+        $summary['selisih_mutasi'] =
 
-        $pasienMeninggalKategori =
+            $summary['pasien_pindahan']
 
-            $item->pasien_meninggal_kurang_48_jam_laki
+            - $summary['pasien_dipindahkan'];
 
-            + $item->pasien_meninggal_kurang_48_jam_cewe
+        $summary['jumlah_kelompok'] = $data->count();
 
-            + $item->pasien_meninggal_lebih_48_jam_laki
-
-            + $item->pasien_meninggal_lebih_48_jam_cewe;
-
-        /*
-         * Total pasien meninggal diambil langsung dari
-         * jumlah pasien keluar mati agar pasien dengan
-         * jenis kelamin tidak valid tidak terlewat.
-         */
-
-        $item->pasien_meninggal_total =
-            $item->pasien_keluar_mati;
-
-        $item->pasien_meninggal_kategori =
-            $pasienMeninggalKategori;
-
-        $item->selisih_kategori_meninggal =
-            $item->pasien_keluar_mati
-            - $pasienMeninggalKategori;
-
-        /*
-        |----------------------------------------------
-        | Menghitung pasien akhir bulan
-        |----------------------------------------------
-        */
-
-        $item->pasien_akhir_bulan =
-
-            $item->pasien_awal_bulan
-
-            + $item->pasien_masuk
-
-            + $item->pasien_pindahan
-
-            - $item->pasien_keluar_hidup
-
-            - $item->pasien_keluar_mati
-
-            - $item->pasien_dipindahkan;
-
-        /*
-        |----------------------------------------------
-        | Validasi sensus awal bulan
-        |----------------------------------------------
-        */
-
-        $item->selisih_sensus_awal =
-
-            $item->pasien_awal_bulan
-
-            - $item->pasien_awal_bulan_aktual;
-
-        /*
-        |----------------------------------------------
-        | Validasi sensus akhir bulan
-        |----------------------------------------------
-        */
-
-        $item->selisih_sensus =
-
-            $item->pasien_akhir_bulan
-
-            - $item->pasien_akhir_bulan_aktual;
-
-        $item->selisih_episode =
-
-            $item->pasien_akhir_bulan
-
-            - $item->pasien_akhir_episode;
-
-        /*
-        |----------------------------------------------
-        | Validasi hari perawatan berdasarkan kelas
-        |----------------------------------------------
-        */
-
-        $item->total_hari_perawatan_kelas =
-
-            $item->kelas_vvip
-
-            + $item->kelas_vip
-
-            + $item->kelas_1
-
-            + $item->kelas_2
-
-            + $item->kelas_3
-
-            + $item->kelas_khusus
-
-            + $item->kelas_tidak_diketahui;
-
-        $item->selisih_hari_perawatan =
-
-            $item->jumlah_hari_perawatan
-
-            - $item->total_hari_perawatan_kelas;
-
-        /*
-        |----------------------------------------------
-        | Menentukan status validasi setiap pelayanan
-        |----------------------------------------------
-        */
-
-        $item->status_validasi = (
-
-            $item->selisih_sensus_awal === 0
-
-            && $item->selisih_sensus === 0
-
-            && $item->selisih_episode === 0
-
-            && $item->selisih_hari_perawatan === 0
-
-            && $item->selisih_kategori_meninggal === 0
-
-            && $item->kelas_tidak_diketahui === 0
-
-            && $item->pasien_akhir_bulan >= 0
-
-        ) ? 'VALIDASI_INTERNAL_OK' : 'PERLU_VERIFIKASI';
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | 6. Rekapitulasi keseluruhan laporan
-    |--------------------------------------------------------------------------
-    */
-
-    $summary = [
-
-        'pasien_awal_bulan' =>
-            (int) $data->sum('pasien_awal_bulan'),
-
-        'pasien_masuk' =>
-            (int) $data->sum('pasien_masuk'),
-
-        'pasien_pindahan' =>
-            (int) $data->sum('pasien_pindahan'),
-
-        'pasien_dipindahkan' =>
-            (int) $data->sum('pasien_dipindahkan'),
-
-        'pasien_keluar_hidup' =>
-            (int) $data->sum('pasien_keluar_hidup'),
-
-        'pasien_keluar_mati' =>
-            (int) $data->sum('pasien_keluar_mati'),
-
-        'pasien_akhir_bulan' =>
-            (int) $data->sum('pasien_akhir_bulan'),
-
-        'pasien_awal_bulan_aktual' =>
-            (int) $data->sum('pasien_awal_bulan_aktual'),
-
-        'pasien_akhir_bulan_aktual' =>
-            (int) $data->sum('pasien_akhir_bulan_aktual'),
-
-        'jumlah_lama_dirawat' =>
-            (int) $data->sum('jumlah_lama_dirawat'),
-
-        'jumlah_lama_episode' =>
-            (int) $data->sum('jumlah_lama_episode'),
-
-        'jumlah_hari_perawatan' =>
-            (int) $data->sum('jumlah_hari_perawatan'),
-
-        'kelas_vvip' =>
-            (int) $data->sum('kelas_vvip'),
-
-        'kelas_vip' =>
-            (int) $data->sum('kelas_vip'),
-
-        'kelas_1' =>
-            (int) $data->sum('kelas_1'),
-
-        'kelas_2' =>
-            (int) $data->sum('kelas_2'),
-
-        'kelas_3' =>
-            (int) $data->sum('kelas_3'),
-
-        'kelas_khusus' =>
-            (int) $data->sum('kelas_khusus'),
-
-        'kelas_tidak_diketahui' =>
-            (int) $data->sum('kelas_tidak_diketahui'),
-
-        'selisih_sensus_awal' =>
-            (int) $data->sum('selisih_sensus_awal'),
-
-        'selisih_sensus' =>
-            (int) $data->sum('selisih_sensus'),
-
-        'selisih_mutasi' =>
-
-            (int) $data->sum('pasien_pindahan')
-
-            - (int) $data->sum('pasien_dipindahkan'),
-
-        'jumlah_kelompok' =>
-            $data->count(),
-
-        'jumlah_kelompok_tidak_valid' =>
-
+        $summary['jumlah_kelompok_tidak_valid'] =
             $data->filter(function ($item) {
 
                 return $item->status_validasi
                     !== 'VALIDASI_INTERNAL_OK';
 
-            })->count(),
+            })->count();
 
         /*
-         * Gunakan MAX karena hasil audit merupakan
-         * data global yang sama pada setiap baris.
+         * Data audit merupakan data global yang sama
+         * pada setiap kelompok, sehingga gunakan MAX.
          */
 
-        'jumlah_mapping_konflik' =>
-            (int) $data->max('jumlah_mapping_konflik'),
+        $auditFields = [
+            'jumlah_mapping_konflik',
+            'jumlah_pasien_tambahan_perinatologi',
+            'perinatologi_mapping_berbeda',
+            'jumlah_apd_duplikat',
+            'jumlah_kronologi_tidak_valid',
+            'jumlah_jeda_riwayat',
+            'jumlah_riwayat_tumpang_tindih',
+            'jumlah_waktu_masuk_bersamaan',
+            'jumlah_kandidat_tanpa_apd'
+        ];
 
-        'jumlah_apd_duplikat' =>
-            (int) $data->max('jumlah_apd_duplikat'),
+        foreach ($auditFields as $field) {
 
-        'jumlah_kronologi_tidak_valid' =>
-            (int) $data->max('jumlah_kronologi_tidak_valid'),
+            $summary[$field] =
+                (int) $data->max($field);
+        }
 
-        'jumlah_jeda_riwayat' =>
-            (int) $data->max('jumlah_jeda_riwayat'),
+        if ($summary['perinatologi_mapping_berbeda'] > 0) {
 
-        'jumlah_riwayat_tumpang_tindih' =>
-            (int) $data->max('jumlah_riwayat_tumpang_tindih'),
+            $peringatan[] =
+                'Terdapat pasien Perinatologi yang sudah '
+                . 'dipetakan ke kelompok pelayanan lain. '
+                . 'Untuk laporan lokal, pemetaan ruangan Perinatologi diprioritaskan; perlu diverifikasi.';
+        }
 
-        'jumlah_kandidat_tanpa_apd' =>
-            (int) $data->max('jumlah_kandidat_tanpa_apd'),
-    ];
+        /*
+        |--------------------------------------------------------------------------
+        | 8. Validasi keseluruhan laporan
+        |--------------------------------------------------------------------------
+        */
 
-    /*
-    |--------------------------------------------------------------------------
-    | 7. Validasi keseluruhan laporan
-    |--------------------------------------------------------------------------
-    */
+        $summary['status_validasi'] = (
 
-    $summary['status_validasi'] = (
+            $data->isNotEmpty()
 
-        $data->isNotEmpty()
+            && empty($peringatan)
 
-        && $summary['selisih_mutasi'] === 0
+            && $summary['selisih_mutasi'] === 0
 
-        && $summary['selisih_sensus_awal'] === 0
+            && $summary['selisih_sensus_awal'] === 0
 
-        && $summary['selisih_sensus'] === 0
+            && $summary['selisih_sensus'] === 0
 
-        && $summary['jumlah_kelompok_tidak_valid'] === 0
+            && $summary['jumlah_kelompok_tidak_valid'] === 0
 
-        && $summary['jumlah_mapping_konflik'] === 0
+            && $summary['jumlah_mapping_konflik'] === 0
 
-        && $summary['jumlah_kronologi_tidak_valid'] === 0
+            && $summary['jumlah_kronologi_tidak_valid'] === 0
 
-        && $summary['jumlah_apd_duplikat'] === 0
+            && $summary['jumlah_apd_duplikat'] === 0
 
-        && $summary['jumlah_jeda_riwayat'] === 0
+            && $summary['jumlah_jeda_riwayat'] === 0
 
-        && $summary['jumlah_riwayat_tumpang_tindih'] === 0
+            && $summary['jumlah_riwayat_tumpang_tindih'] === 0
 
-        && $summary['jumlah_kandidat_tanpa_apd'] === 0
+            && $summary['jumlah_waktu_masuk_bersamaan'] === 0
 
-    ) ? 'VALIDASI_INTERNAL_OK' : 'PERLU_VERIFIKASI';
+            && $summary['jumlah_kandidat_tanpa_apd'] === 0
 
-    /*
-    |--------------------------------------------------------------------------
-    | 8. Response API
-    |--------------------------------------------------------------------------
-    */
+        ) ? 'VALIDASI_INTERNAL_OK'
+            : 'PERLU_VERIFIKASI';
 
-    return $this->respond([
+        /*
+        |--------------------------------------------------------------------------
+        | 9. Informasi Perinatologi
+        |--------------------------------------------------------------------------
+        */
 
-        'data' => $data->values(),
+        $perinatologi = $data->first(function ($item) {
+            return $item->is_perinatologi === 1;
+        });
 
-        'summary' => $summary,
+        $auditTahap = [];
+        foreach (['perinatologi_terpetakan', 'perinatologi_konflik',
+                  'perinatologi_riwayat_valid', 'perinatologi_episode_periode'] as $field) {
+            $auditTahap[$field] = (int) $data->max($field);
+        }
+        $auditPerinatologi = [
+            'ruangan_kandidat' => $ruanganKandidat->map(function ($r) {
+                return ['id' => (int) $r->id, 'namaruangan' => $r->namaruangan,
+                    'statusenabled' => $r->statusenabled];
+            })->values()->all(),
+            'filter_dasar' => $auditDasar,
+            'tahapan' => $auditTahap,
+            'catatan' => 'Jumlah tahap mapping dan riwayat mencakup histori kandidat; episode dibatasi periode. Jumlah registrasi antar alasan tidak boleh dijumlahkan sebagai pasien unik.'
+        ];
+        if (!$perinatologi || $auditTahap['perinatologi_episode_periode'] === 0) {
+            $peringatan[] = 'Tidak ditemukan episode Perinatologi pada periode laporan; periksa audit_perinatologi.';
+            $summary['status_validasi'] = 'PERLU_VERIFIKASI';
+        }
+        Log::info('RL3.2 - Audit Perinatologi', $auditPerinatologi);
 
-        'periode' => [
+        $informasiPerinatologi = [
+
+            'tersedia' => $perinatologi !== null,
+
+            'idkonten' => $idKontenPerinatologi,
+            'kelompok_virtual' => $perinatologiVirtual,
+
+            'idruangan' => $idRuanganPerinatologi,
+
+            'daftar_ruangan' => $ruanganPerinatologi
+                ->pluck('namaruangan')
+                ->values()
+                ->all(),
+
+            'jumlah_tempat_tidur' => $perinatologi
+                ? $perinatologi->jumlah_tempat_tidur
+                : 0,
+
+            'pasien_awal_bulan' => $perinatologi
+                ? $perinatologi->pasien_awal_bulan
+                : 0,
+
+            'pasien_masuk' => $perinatologi
+                ? $perinatologi->pasien_masuk
+                : 0,
+
+            'pasien_pindahan' => $perinatologi
+                ? $perinatologi->pasien_pindahan
+                : 0,
+
+            'pasien_dipindahkan' => $perinatologi
+                ? $perinatologi->pasien_dipindahkan
+                : 0,
+
+            'pasien_keluar_hidup' => $perinatologi
+                ? $perinatologi->pasien_keluar_hidup
+                : 0,
+
+            'pasien_keluar_mati' => $perinatologi
+                ? $perinatologi->pasien_keluar_mati
+                : 0,
+
+            'pasien_akhir_bulan' => $perinatologi
+                ? $perinatologi->pasien_akhir_bulan
+                : 0,
+
+            'jumlah_hari_perawatan' => $perinatologi
+                ? $perinatologi->jumlah_hari_perawatan
+                : 0,
+
+            'tambahan_pemetaan_pasien' =>
+                $summary['jumlah_pasien_tambahan_perinatologi'],
+
+            'mapping_berbeda' =>
+                $summary['perinatologi_mapping_berbeda']
+        ];
+
+        /*
+        |--------------------------------------------------------------------------
+        | 10. Logging hasil laporan
+        |--------------------------------------------------------------------------
+        */
+
+        $durasi = round(
+            microtime(true) - $startTime,
+            2
+        );
+
+        Log::info('RL3.2 - Perhitungan selesai', [
+            'bulan' => $bulan,
+            'tahun' => $tahun,
+            'jumlah_kelompok' => $data->count(),
+            'durasi_detik' => $durasi,
+            'status_validasi' => $summary['status_validasi'],
+            'perinatologi_tersedia' =>
+                $informasiPerinatologi['tersedia'],
+            'tambahan_perinatologi' =>
+                $summary['jumlah_pasien_tambahan_perinatologi']
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | 11. Response API
+        |--------------------------------------------------------------------------
+        */
+
+        return $this->respond([
+
+            'data' => $data->values(),
+
+            'summary' => $summary,
+
+            'perinatologi' => $informasiPerinatologi,
+            'audit_perinatologi' => $auditPerinatologi,
+
+            'peringatan' => $peringatan,
+
+            'periode' => [
+
+                'bulan' => $bulan,
+
+                'tahun' => $tahun,
+
+                'awal_bulan' =>
+                    $awalBulan->format('Y-m-d H:i:s'),
+
+                'akhir_bulan' =>
+                    $akhirBulan->format('Y-m-d H:i:s'),
+
+                'batas_laporan' =>
+                    $batasLaporan->format('Y-m-d H:i:s'),
+
+                'bulan_berjalan' =>
+                    $batasLaporan->lt($akhirBulan)
+            ],
+
+            'durasi_detik' => $durasi,
+
+            'message' => 'Success'
+        ]);
+
+    } catch (\Throwable $e) {
+
+        /*
+        |--------------------------------------------------------------------------
+        | 12. Penanganan error
+        |--------------------------------------------------------------------------
+        */
+
+        $errorInfo = $e instanceof \Illuminate\Database\QueryException
+            ? ($e->errorInfo ?? [])
+            : [];
+
+        Log::error('RL3.2 - Perhitungan gagal', [
 
             'bulan' => $bulan,
 
             'tahun' => $tahun,
 
-            'awal_bulan' =>
-                $awalBulan->format('Y-m-d H:i:s'),
+            'tahap' => $tahap,
 
-            'akhir_bulan' =>
-                $akhirBulan->format('Y-m-d H:i:s'),
+            'exception' => get_class($e),
 
-            'batas_laporan' =>
-                $batasLaporan->format('Y-m-d H:i:s'),
+            'code' => $e->getCode(),
 
-            'bulan_berjalan' =>
-                $batasLaporan->lt($akhirBulan)
-        ],
+            'sqlstate' => $errorInfo[0] ?? null,
 
-        'message' => 'Success'
-    ]);
+            'driver_code' => $errorInfo[1] ?? null,
+
+            'file' => $e->getFile(),
+
+            'line' => $e->getLine(),
+
+            'durasi_detik' => round(
+                microtime(true) - $startTime,
+                2
+            )
+        ]);
+
+        return response()->json([
+
+            'data' => [],
+
+            'success' => false,
+
+            'code' => 'RL_CALCULATION_FAILED',
+
+            'message' =>
+                'Gagal menghitung laporan RL 3.2.',
+
+            'tahap' => $tahap
+
+        ], 503);
+    }
 }
+
+
+
+
 
 
     // Jhon | 2026-11-25 19:41 WITA | TAMBAH: getBedCountForRooms; pertahankan struktur hasil sumber.
