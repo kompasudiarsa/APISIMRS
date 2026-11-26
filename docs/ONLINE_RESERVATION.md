@@ -54,3 +54,7 @@ Uji staging dengan data dummy: master, dokter per poli, hari libur, tanggal di l
 Halaman NADI tetap membutuhkan login pasien. Pasien baru dapat dimasukkan melalui akun yang sedang login; APR baru belum memiliki nocmfk, sehingga bukti segera disajikan setelah simpan tetapi belum tentu muncul pada daftar berbasis RM akun lama sampai dipadankan petugas. Kanal pendaftaran umum tanpa login, pembatalan, kartu pasien elektronik, e-billing dan bridging BPJS/SEP bukan bagian endpoint simpan ini; fitur lama tidak dihapus atau disalin tanpa integrasi yang sesuai.
 
 Status verifikasi agent: pemeriksaan sintaks/parser dan simulasi JavaScript saja; PHP/database, kirim reservasi, konkurensi lintas kanal dan UAT browser belum dilakukan. Tidak ada deployment atau penulisan pasien nyata.
+
+<!-- Jhon | 2026-11-25 08:28 WITA | UBAH: Kontrak dokter berdasarkan tanggal. -->
+## Lookup dokter tanggal pelayanan
+GET /api/service/reservasi-online/dokter sekarang mewajibkan poli_id dan tanggal YYYY-MM-DD (signature existing tetap). Tanpa tanggal422. Dokter aktif dan mapping poli/profil difilter lagi dengan jadwaldokter_m aktif: tanggal khusus exact atau hari mingguan sesuai, quota>0, jamakhir>jammulai. dateAllowed existing membatasi rentang/libur/cutoff. Slot memakai predikat jadwal sama; dokter tanggal lain ditolak. Jadwal ada tidak menjamin slot tersisa. Tidak mengubah schema maupun aturan simpan dan penjamin. Dokumen tes: OnlineDoctorDateTest, SQLite dummy, bukan query pasien produksi.

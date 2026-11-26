@@ -24,6 +24,9 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 Route::prefix('service')
     ->middleware('api.signature')
     ->group(function () {
+        // Jhon | 2026-11-25 19:41 WITA | TAMBAH: API laporan RL dalam proteksi signature existing.
+        Route::get('/sirs/rl', [\App\Http\Controllers\Api\Service\SirsRlReportController::class, 'index']);
+        Route::get('/sirs/rl/{report}', [\App\Http\Controllers\Api\Service\SirsRlReportController::class, 'show'])->middleware('throttle:30,1');
         // Jhon | 2026-11-24 13:55 WITA | TAMBAH: Lookup log BPJS bertanda tangan, tanpa panggilan/tulis ke BPJS.
         Route::post('/bpjs-log/antrean', [\App\Http\Controllers\Api\Service\BpjsLogLookupController::class, 'antrean'])->middleware('throttle:30,1');
         Route::post('/bpjs-log/surat-kontrol', [\App\Http\Controllers\Api\Service\BpjsLogLookupController::class, 'suratKontrol'])->middleware('throttle:30,1');

@@ -10,7 +10,8 @@ class OnlineReservationController extends Controller {
  private function run($callback){try{return response()->json(['data'=>$callback()])->header('Cache-Control','private, no-store');}catch(ValidationException $e){return response()->json(['message'=>'Periksa data reservasi.','errors'=>$e->errors()],422);}catch(\Throwable $e){\Illuminate\Support\Facades\Log::warning('Online reservation failed',['type'=>get_class($e)]);return response()->json(['message'=>'Layanan reservasi belum dapat diproses. Hubungi petugas bila berulang.'],503);}}
  private function valid(Request $r,$rules){$v=Validator::make($r->all(),$rules);if($v->fails())throw new ValidationException($v);return $v->validated();}
  public function master(OnlineReservationService $s){return $this->run(function()use($s){return $s->master();});}
- public function doctors(Request $r,OnlineReservationService $s){return $this->run(function()use($r,$s){$v=$this->valid($r,['poli_id'=>'required|integer|min:1']);return $s->doctors($v['poli_id']);});}
+ // Jhon | 2026-11-25 08:23 WITA | UBAH: Lookup dokter mewajibkan tanggal pelayanan yang dipilih pasien.
+ public function doctors(Request $r,OnlineReservationService $s){return $this->run(function()use($r,$s){$v=$this->valid($r,['poli_id'=>'required|integer|min:1','tanggal'=>'required|date_format:Y-m-d']);return $s->doctors($v['poli_id'],$v['tanggal']);});}
  public function slots(Request $r,OnlineReservationService $s){return $this->run(function()use($r,$s){$v=$this->valid($r,['poli_id'=>'required|integer|min:1','dokter_id'=>'required|integer|min:1','tanggal'=>'required|date_format:Y-m-d']);return $s->slots($v['poli_id'],$v['dokter_id'],$v['tanggal']);});}
  public function save(Request $r,OnlineReservationService $s){return $this->run(function()use($r,$s){$v=$this->valid($r,[
  'patient_id'=>'required|string|max:64','nocm'=>'required|string|max:30','request_id'=>'required|uuid','jenis_pasien'=>'required|in:lama,baru',

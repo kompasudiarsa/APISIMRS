@@ -25,11 +25,25 @@ class OnlineReservationService {
   'tanggal_max'=>Carbon::now('Asia/Makassar')->addDays(max(1,(int)$this->setting('isRentangReservasi',28)))->toDateString(),
   'libur'=>$this->active('slottinglibur_m')->whereDate('tgllibur','>=',Carbon::now('Asia/Makassar')->toDateString())->pluck('tgllibur'),
  ];}
- public function doctors($room){
+ public function doctors($room,$date=null){
+  // Jhon | 2026-11-25 08:23 WITA | UBAH: Tanggal opsional untuk pemanggil internal lama; route dokter mewajibkan tanggal.
+  if($date!==null)$this->dateAllowed($date);
   if(!$this->rooms()->contains('id',(int)$room))$this->fail('Poli tidak tersedia untuk reservasi online.');
   $types=array_filter(array_map('intval',explode(',',(string)$this->setting('kdPsikologDokter',$this->setting('idJenisPegawaiDokter','')))));
   if(!$types)$this->fail('Jenis petugas dokter untuk reservasi belum dikonfigurasi.');
-  return $this->table('pegawai_m as p')->join('mappegawaitoruangan_m as m','m.objectpegawaifk','=','p.id')->where('p.kdprofile',self::PROFILE)->where('p.statusenabled',true)->where('m.kdprofile',self::PROFILE)->where('m.statusenabled',true)->where('m.objectruanganfk',$room)->whereIn('p.objectjenispegawaifk',$types)->distinct()->orderBy('p.namalengkap')->get(['p.id','p.namalengkap']);
+  $doctors=$this->table('pegawai_m as p')->join('mappegawaitoruangan_m as m','m.objectpegawaifk','=','p.id')->where('p.kdprofile',self::PROFILE)->where('p.statusenabled',true)->where('m.kdprofile',self::PROFILE)->where('m.statusenabled',true)->where('m.objectruanganfk',$room)->whereIn('p.objectjenispegawaifk',$types)->distinct()->orderBy('p.namalengkap')->get(['p.id','p.namalengkap']);
+  if($date===null)return $doctors;
+  $scheduled=$this->active('jadwaldokter_m')->where('objectruanganfk',$room)->get(['objectpegawaifk','tanggal','hari','jammulai','jamakhir','quota']);
+  $ids=[];foreach($scheduled as $row){if($this->scheduleMatches($row,$date))$ids[(string)$row->objectpegawaifk]=true;}
+  return $doctors->filter(function($doctor)use($ids){return isset($ids[(string)$doctor->id]);})->values();
+ }
+ // Jhon | 2026-11-25 08:23 WITA | TAMBAH: Predikat jadwal dipakai bersama daftar dokter dan slot, tanggal khusus tidak menjadi jadwal mingguan.
+ private function scheduleMatches($s,$date){
+  if((int)$s->quota<=0)return false;
+  if($s->tanggal){if(Carbon::parse($s->tanggal)->toDateString()!==$date)return false;}
+  else{$days=['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];$name=$days[Carbon::parse($date)->dayOfWeek];$list=array_map('strtolower',array_map('trim',explode(',',(string)$s->hari)));if(!in_array(strtolower($name),$list,true))return false;}
+  if(!$s->jammulai||!$s->jamakhir)return false;
+  return Carbon::parse($s->jamakhir)->format('H:i')>Carbon::parse($s->jammulai)->format('H:i');
  }
  private function dateAllowed($date){$day=Carbon::createFromFormat('!Y-m-d',$date,'Asia/Makassar');$now=Carbon::now('Asia/Makassar');$range=max(1,(int)$this->setting('isRentangReservasi',28));
   if($day->lte($now->copy()->startOfDay())||$day->gt($now->copy()->addDays($range)->endOfDay()))$this->fail('Tanggal di luar rentang reservasi.');
@@ -37,15 +51,14 @@ class OnlineReservationService {
   $cutoff=(string)$this->setting('maxJamReservasi','13:00');if($day->isSameDay($now->copy()->addDay())&&$now->format('H:i')>substr($cutoff,0,5))$this->fail('Pemesanan untuk besok sudah melewati batas waktu.');
  }
  // Jhon | 2026-11-18 15:18 WITA | TAMBAH: Jadwal/slot dihitung ulang server; parameter SQL terikat, tidak menyalin interpolasi request mentah.
- public function slots($room,$doctor,$date){$this->dateAllowed($date);if(!$this->doctors($room)->contains('id',(int)$doctor))$this->fail('Dokter tidak tersedia di poli ini.');
+ public function slots($room,$doctor,$date){$this->dateAllowed($date);if(!$this->doctors($room,$date)->contains('id',(int)$doctor))$this->fail('Dokter tidak tersedia di poli ini.');
   $schedules=$this->active('jadwaldokter_m')->where('objectruanganfk',$room)->where('objectpegawaifk',$doctor)->get(['id','tanggal','hari','jammulai','jamakhir','quota']);
   $days=['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];$dayName=$days[Carbon::parse($date)->dayOfWeek];$result=[];$capacity=0;
   $used=$this->active('antrianpasienregistrasi_t')->where('objectruanganfk',$room)->whereDate('tanggalreservasi',$date)->whereNotNull('noreservasi')->where('noreservasi','!=','-')->get(['jam','tanggalreservasi']);
   // Konsisten dengan sumber: waktu terpakai dibatasi per ruangan, bukan hanya dokter.
   $busy=[];foreach($used as $row){$busy[substr($row->jam?:Carbon::parse($row->tanggalreservasi)->format('H:i'),0,5)]=true;}
   foreach($schedules as $s){
-   if($s->tanggal){if(Carbon::parse($s->tanggal)->toDateString()!==$date)continue;}
-   else { $daysFor=array_map('trim',explode(',',(string)$s->hari));if(!in_array(strtolower($dayName),array_map('strtolower',$daysFor),true))continue; }
+   if(!$this->scheduleMatches($s,$date))continue;
    $quota=(int)$s->quota;if($quota<=0)continue;
    $begin=Carbon::parse($date.' '.Carbon::parse($s->jammulai)->format('H:i'),'Asia/Makassar');$end=Carbon::parse($date.' '.Carbon::parse($s->jamakhir)->format('H:i'),'Asia/Makassar');if($end->lte($begin))continue;
    $minutes=max(1,(int)floor($begin->diffInMinutes($end)/$quota));$capacity+=$quota;
